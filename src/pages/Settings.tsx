@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase/client';
 import type { Profile } from '../lib/supabase/client';
 import { Button } from '../components/shadcn/Button';
 import { Card } from '../components/shadcn/Card';
+import { DomainSetup } from '../components/settings/DomainSetup';
 
 export default function Settings() {
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -124,8 +125,9 @@ export default function Settings() {
     <div className="container mx-auto px-4 py-8">
       <h1 className="text-3xl font-bold mb-8">Account Settings</h1>
 
-      <div className="max-w-2xl">
+      <div className="space-y-8 max-w-4xl">
         <Card>
+          <h2 className="text-xl font-bold mb-6">Profile Settings</h2>
           <form onSubmit={handleUpdateProfile} className="space-y-6">
             <div>
               <label className="block text-sm font-medium mb-2">
@@ -197,6 +199,9 @@ export default function Settings() {
             </div>
           </form>
         </Card>
+
+        {/* Domain Authentication Section */}
+        <DomainSetup />
       </div>
     </div>
   );

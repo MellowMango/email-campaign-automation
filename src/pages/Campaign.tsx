@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase/client';
-import type { Campaign as CampaignType, Email, Contact } from '../lib/supabase/client';
+import type { Campaign, Email, Contact } from '../types';
 import { Button } from '../components/shadcn/Button';
 import { Card } from '../components/shadcn/Card';
 import { generateEmailContent } from '../lib/openai';
@@ -36,7 +36,7 @@ const formatDateForDisplay = (dateStr: string) => {
 export default function Campaign() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [campaign, setCampaign] = useState<CampaignType | null>(null);
+  const [campaign, setCampaign] = useState<Campaign | null>(null);
   const [emails, setEmails] = useState<Email[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [activeTab, setActiveTab] = useState<'overview' | 'contacts' | 'emails' | 'analytics'>('overview');
@@ -55,6 +55,7 @@ export default function Campaign() {
   const [isGeneratingContent, setIsGeneratingContent] = useState(false);
   const [showSequencePlanner, setShowSequencePlanner] = useState(false);
   const [showContactSelection, setShowContactSelection] = useState(false);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   if (!id) {
     return (
@@ -161,41 +162,66 @@ export default function Campaign() {
 
   const handleCreateEmail = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError(null);
+    setSuccessMessage(null);
+    
     try {
       const scheduledAt = newEmail.scheduled_at ? new Date(newEmail.scheduled_at).toISOString() : null;
       const emailData = {
+        campaign_id: id,
         subject: newEmail.subject,
         content: newEmail.content,
         scheduled_at: scheduledAt,
-        status: 'pending' as const
+        status: scheduledAt ? ('pending' as const) : ('draft' as const)
       };
       
       if (newEmail.id) {
         // Update existing email
         const { error } = await supabase
           .from('emails')
-          .update(emailData)
+          .update({
+            subject: emailData.subject,
+            content: emailData.content,
+            scheduled_at: emailData.scheduled_at,
+            status: emailData.status
+          })
           .eq('id', newEmail.id);
 
         if (error) throw error;
+        
+        // Update local state
+        setEmails(prev => prev.map(email => 
+          email.id === newEmail.id 
+            ? { ...email, ...emailData }
+            : email
+        ));
+        
+        setSuccessMessage('Email updated successfully');
+        // Don't reset form for updates
       } else {
         // Create new email
-        const { error } = await supabase
+        const { data, error } = await supabase
           .from('emails')
-          .insert([{
-            ...emailData,
-            campaign_id: id,
-          }]);
+          .insert([emailData])
+          .select()
+          .single();
 
         if (error) throw error;
-      }
+        
+        // Update local state
+        if (data) {
+          setEmails(prev => [data as Email, ...prev]);
+        }
 
-      // Reset form
-      setNewEmail({
-        subject: '',
-        content: '',
-        scheduled_at: ''
-      });
+        // Reset form only for new emails
+        setNewEmail({
+          subject: '',
+          content: '',
+          scheduled_at: ''
+        });
+        
+        setSuccessMessage('Email created successfully');
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save email');
     }
@@ -303,7 +329,7 @@ Please generate a persuasive email that aligns with the campaign goals and targe
     }
   };
 
-  const handleUpdateCampaignStatus = async (status: CampaignType['status']) => {
+  const handleUpdateCampaignStatus = async (status: Campaign['status']) => {
     try {
       const { error } = await supabase
         .from('campaigns')
@@ -389,7 +415,7 @@ Please generate a persuasive email that aligns with the campaign goals and targe
         <div className="space-x-4">
           <select
             value={campaign.status}
-            onChange={(e) => handleUpdateCampaignStatus(e.target.value as CampaignType['status'])}
+            onChange={(e) => handleUpdateCampaignStatus(e.target.value as Campaign['status'])}
             className="bg-background-secondary border border-gray-700 rounded px-3 py-2"
           >
             <option value="draft">Draft</option>
@@ -568,6 +594,16 @@ Please generate a persuasive email that aligns with the campaign goals and targe
                 <h3 className="text-lg font-semibold mb-4">
                   {newEmail.id ? 'Edit Email' : 'Create New Email'}
                 </h3>
+                {successMessage && (
+                  <div className="mb-4 p-3 bg-green-900/50 border border-green-500 text-green-300 rounded">
+                    {successMessage}
+                  </div>
+                )}
+                {error && (
+                  <div className="mb-4 p-3 bg-red-900/50 border border-red-500 text-red-300 rounded">
+                    {error}
+                  </div>
+                )}
                 <form onSubmit={handleCreateEmail} className="space-y-4">
                   <div>
                     <label className="block text-sm font-medium mb-2">

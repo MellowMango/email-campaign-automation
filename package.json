@@ -16,6 +16,8 @@
     "@fullcalendar/daygrid": "^6.1.15",
     "@fullcalendar/interaction": "^6.1.15",
     "@fullcalendar/react": "^6.1.15",
+    "@sendgrid/client": "^8.1.4",
+    "@sendgrid/mail": "^8.1.4",
     "@supabase/supabase-js": "^2.39.3",
     "@types/papaparse": "^5.3.15",
     "@types/react-router-dom": "^5.3.3",
