@@ -266,3 +266,59 @@ Last Updated: [Current Date]
 Current Version: 0.1.0
 
 This documentation will be updated as new features are implemented and existing ones are modified. Please refer to the git history for detailed changes.
+
+## Supabase Client Setup
+
+The application uses Supabase for backend services. The client setup is handled in `src/lib/supabase/client.ts`:
+
+```typescript
+// Import the createClient function and Database type
+import { createClient } from '@supabase/supabase-js';
+import type { Database } from '../../types/supabase';
+
+// Create and export the client
+const client = createClient<Database>(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true
+  }
+});
+
+// Export as both named and default export
+export { client as supabase };
+export default client;
+```
+
+### Important Notes
+
+1. **Export Pattern**: The client must be exported using both named and default exports to work correctly with Vite's HMR (Hot Module Replacement) and ESM (ECMAScript Modules):
+   - Named export: `export { client as supabase }`
+   - Default export: `export default client`
+
+2. **File Structure**:
+   - Keep the client creation in `src/lib/supabase/client.ts`
+   - Export types separately in `src/types/supabase.ts`
+   - Use barrel exports through `src/lib/supabase/index.ts`
+
+3. **Environment Variables**:
+   ```
+   VITE_SUPABASE_URL=your_supabase_url
+   VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
+   ```
+
+4. **TypeScript Integration**:
+   - Define your database types in `src/types/supabase.ts`
+   - Use the `Database` type when creating the client for full type safety
+
+### Common Issues
+
+1. **Module Resolution**: If you see the error "does not provide an export named 'supabase'", check:
+   - The export pattern in `client.ts`
+   - That you're not mixing `.js` and `.ts` files
+   - Clear the Vite cache if needed
+
+2. **Type Errors**: If you see Database type errors:
+   - Ensure your types match your Supabase schema
+   - Check that the Database type is properly exported
+   - Verify the import paths are correct
