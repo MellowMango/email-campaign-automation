@@ -274,6 +274,98 @@ class SendGridService {
 
     return poll();
   }
+
+  /**
+   * Create sender verification for a user's email address
+   */
+  async createSenderVerification(senderEmail: string): Promise<boolean> {
+    try {
+      // First check if sender already exists
+      const checkResponse = await fetch('https://api.sendgrid.com/v3/verified_senders', {
+        method: 'GET',
+        headers: defaultHeaders
+      });
+
+      if (!checkResponse.ok) {
+        throw new Error('Failed to check existing senders');
+      }
+
+      const data = await checkResponse.json();
+      const existingSender = data.results.find((sender: any) => sender.from_email === senderEmail);
+
+      if (existingSender) {
+        if (existingSender.verified) {
+          // Sender already exists and is verified
+          return true;
+        }
+
+        // Sender exists but not verified - resend verification email
+        const resendResponse = await fetch(`https://api.sendgrid.com/v3/verified_senders/${existingSender.id}/resend_verification`, {
+          method: 'POST',
+          headers: defaultHeaders
+        });
+
+        if (!resendResponse.ok) {
+          throw new Error('Failed to resend verification email');
+        }
+
+        return true;
+      }
+
+      // Create new sender if doesn't exist
+      const response = await fetch('https://api.sendgrid.com/v3/verified_senders', {
+        method: 'POST',
+        headers: defaultHeaders,
+        body: JSON.stringify({
+          nickname: senderEmail.split('@')[0],
+          from_email: senderEmail,
+          from_name: senderEmail.split('@')[0],
+          reply_to: senderEmail,
+          reply_to_name: senderEmail.split('@')[0],
+          address: '123 Main St',
+          address_2: '',
+          city: 'San Francisco',
+          state: 'CA',
+          zip: '94105',
+          country: 'US'
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.errors?.[0]?.message || 'Failed to create sender verification');
+      }
+
+      return true;
+    } catch (error) {
+      console.error('SendGrid sender verification error:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Check sender verification status
+   */
+  async checkSenderVerification(senderEmail: string): Promise<boolean> {
+    try {
+      const response = await fetch('https://api.sendgrid.com/v3/verified_senders', {
+        method: 'GET',
+        headers: defaultHeaders
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to check sender verification status');
+      }
+
+      const data = await response.json();
+      const verifiedSender = data.results.find((sender: any) => sender.from_email === senderEmail);
+      
+      return verifiedSender?.verified || false;
+    } catch (error) {
+      console.error('SendGrid check sender verification error:', error);
+      return false;
+    }
+  }
 }
 
 export const sendgrid = new SendGridService();

@@ -26,6 +26,13 @@ export interface CampaignSetupData {
   enableAdaptiveSequences: boolean;
   enableAutoResponder: boolean;
   enableLeadScoring: boolean;
+
+  // CTA Links
+  ctaLinks: {
+    awareness: string;
+    conversion: string;
+    nurture: string;
+  };
 }
 
 const defaultData: CampaignSetupData = {
@@ -41,6 +48,11 @@ const defaultData: CampaignSetupData = {
   enableAdaptiveSequences: false,
   enableAutoResponder: false,
   enableLeadScoring: false,
+  ctaLinks: {
+    awareness: '',
+    conversion: '',
+    nurture: ''
+  }
 };
 
 export function CampaignSetup({ onClose, onSave, initialData }: CampaignSetupProps) {
@@ -147,6 +159,51 @@ export function CampaignSetup({ onClose, onSave, initialData }: CampaignSetupPro
                 <option value="friendly">Friendly</option>
                 <option value="casual">Casual</option>
               </select>
+            </div>
+            <div className="space-y-6">
+              <h3 className="text-xl font-semibold mb-4">Call-to-Action Links</h3>
+              <p className="text-gray-400 mb-4">
+                Set up sequence-specific CTA links that will be automatically included in your emails based on their sequence type.
+              </p>
+              <div>
+                <label className="block text-sm font-medium mb-2">Awareness Sequence CTA Link</label>
+                <input
+                  type="url"
+                  value={data.ctaLinks.awareness}
+                  onChange={(e) => updateData({
+                    ctaLinks: { ...data.ctaLinks, awareness: e.target.value }
+                  })}
+                  placeholder="https://example.com/learn-more"
+                  className="input"
+                />
+                <p className="text-sm text-gray-400 mt-1">Used in educational and awareness-focused emails</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-2">Conversion Sequence CTA Link</label>
+                <input
+                  type="url"
+                  value={data.ctaLinks.conversion}
+                  onChange={(e) => updateData({
+                    ctaLinks: { ...data.ctaLinks, conversion: e.target.value }
+                  })}
+                  placeholder="https://example.com/sign-up"
+                  className="input"
+                />
+                <p className="text-sm text-gray-400 mt-1">Used in conversion-focused and decision-stage emails</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-2">Nurture Sequence CTA Link</label>
+                <input
+                  type="url"
+                  value={data.ctaLinks.nurture}
+                  onChange={(e) => updateData({
+                    ctaLinks: { ...data.ctaLinks, nurture: e.target.value }
+                  })}
+                  placeholder="https://example.com/resources"
+                  className="input"
+                />
+                <p className="text-sm text-gray-400 mt-1">Used in relationship-building and nurture emails</p>
+              </div>
             </div>
           </div>
         )}

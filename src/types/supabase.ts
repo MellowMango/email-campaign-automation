@@ -92,6 +92,11 @@ export interface Campaign {
     clicked: number;
     replied: number;
   };
+  cta_links: {
+    awareness: string;
+    conversion: string;
+    nurture: string;
+  };
 }
 
 export interface Contact {

@@ -55,6 +55,25 @@ The Supabase database includes the following main tables:
 
 ### Recent Implementations
 
+#### Campaign CTA Links System
+- Sequence-specific Call-to-Action (CTA) links
+  - Awareness sequence links for educational content
+  - Conversion sequence links for sign-ups/purchases
+  - Nurture sequence links for relationship building
+- Automatic CTA inclusion in generated emails
+- Links stored in campaign settings
+- Real-time CTA link updates
+- Proper validation and error handling
+
+#### Notification System
+- Auto-dismissing success notifications (6.5 seconds)
+- Contextual feedback for user actions
+- Clear visual indicators for:
+  - Campaign updates
+  - Email creation/updates
+  - Contact changes
+  - Error states
+
 #### User Profile System
 - Automatic profile creation on user signup via database trigger
 - Profile management interface with fields:

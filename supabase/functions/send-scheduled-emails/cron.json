@@ -1,0 +1,5 @@
+{
+  "cron": "* * * * *",
+  "function": "send-scheduled-emails",
+  "description": "Send scheduled campaign emails every minute"
+} 
