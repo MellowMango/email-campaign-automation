@@ -12,13 +12,6 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
-  build: {
-    outDir: 'dist',
-    sourcemap: true,
-    commonjsOptions: {
-      transformMixedEsModules: true,
-    },
-  },
   optimizeDeps: {
     include: [
       'react',
@@ -28,11 +21,6 @@ export default defineConfig({
       'clsx',
       'tailwind-merge'
     ],
-    esbuildOptions: {
-      define: {
-        global: 'globalThis'
-      }
-    }
   },
   css: {
     postcss: {
@@ -47,7 +35,4 @@ export default defineConfig({
     strictPort: false,
     open: true,
   },
-  define: {
-    'process.env': {}
-  }
 })
