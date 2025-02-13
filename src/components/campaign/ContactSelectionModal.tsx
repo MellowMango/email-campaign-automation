@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
 import { Button } from '../shadcn/Button';
 import { Card } from '../shadcn/Card';
+import { Input } from '../shadcn/Input';
+import { Checkbox } from '../shadcn/Checkbox';
 import { supabase } from '../../lib/supabase/client';
-import type { Contact, ContactList } from '../../lib/supabase/client';
+import type { Contact, ContactList } from '../../types';
 
 interface ContactSelectionModalProps {
   onClose: () => void;
@@ -17,6 +19,8 @@ export function ContactSelectionModal({ onClose, onSave, campaignId }: ContactSe
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedContactIds, setSelectedContactIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     const fetchData = async () => {
@@ -34,7 +38,7 @@ export function ContactSelectionModal({ onClose, onSave, campaignId }: ContactSe
         const { data: contactsData, error: contactsError } = await supabase
           .from('contacts')
           .select('*')
-          .is('campaign_id', null) // Only get contacts not assigned to any campaign
+          .neq('campaign_id', campaignId) // Exclude contacts already in this campaign
           .order('created_at', { ascending: false });
 
         if (contactsError) throw contactsError;
@@ -47,18 +51,19 @@ export function ContactSelectionModal({ onClose, onSave, campaignId }: ContactSe
     };
 
     fetchData();
-  }, []);
+  }, [campaignId]);
 
   const handleListChange = async (listId: string | 'all') => {
     setSelectedListId(listId);
     setLoading(true);
+    setSelectedContactIds(new Set()); // Clear selections when changing lists
     try {
       if (listId === 'all') {
-        // Fetch all unassigned contacts
+        // Fetch all contacts not in this campaign
         const { data, error } = await supabase
           .from('contacts')
           .select('*')
-          .is('campaign_id', null)
+          .neq('campaign_id', campaignId) // Exclude contacts already in this campaign
           .order('created_at', { ascending: false });
 
         if (error) throw error;
@@ -78,7 +83,7 @@ export function ContactSelectionModal({ onClose, onSave, campaignId }: ContactSe
           .from('contacts')
           .select('*')
           .in('id', contactIds)
-          .is('campaign_id', null)
+          .neq('campaign_id', campaignId) // Exclude contacts already in this campaign
           .order('created_at', { ascending: false });
 
         if (error) throw error;
@@ -92,14 +97,15 @@ export function ContactSelectionModal({ onClose, onSave, campaignId }: ContactSe
   };
 
   const handleSave = async () => {
-    if (contacts.length === 0) {
-      setError('No contacts available to add');
+    if (selectedContactIds.size === 0) {
+      setError('No contacts selected');
       return;
     }
 
     setSaving(true);
     try {
-      await onSave(contacts);
+      const selectedContacts = contacts.filter(contact => selectedContactIds.has(contact.id));
+      await onSave(selectedContacts);
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to add contacts to campaign');
@@ -107,6 +113,41 @@ export function ContactSelectionModal({ onClose, onSave, campaignId }: ContactSe
       setSaving(false);
     }
   };
+
+  const handleSelectAll = (checked: boolean) => {
+    if (checked) {
+      const filteredContactIds = filteredContacts.map(contact => contact.id);
+      setSelectedContactIds(new Set(filteredContactIds));
+    } else {
+      setSelectedContactIds(new Set());
+    }
+  };
+
+  const handleSelectContact = (contactId: string) => {
+    setSelectedContactIds(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(contactId)) {
+        newSet.delete(contactId);
+      } else {
+        newSet.add(contactId);
+      }
+      return newSet;
+    });
+  };
+
+  const filteredContacts = contacts.filter(contact => {
+    if (!searchTerm) return true;
+    const searchLower = searchTerm.toLowerCase();
+    return (
+      contact.email.toLowerCase().includes(searchLower) ||
+      (contact.first_name && contact.first_name.toLowerCase().includes(searchLower)) ||
+      (contact.last_name && contact.last_name.toLowerCase().includes(searchLower)) ||
+      (contact.company && contact.company.toLowerCase().includes(searchLower))
+    );
+  });
+
+  const allFilteredSelected = filteredContacts.length > 0 && 
+    filteredContacts.every(contact => selectedContactIds.has(contact.id));
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4">
@@ -147,9 +188,18 @@ export function ContactSelectionModal({ onClose, onSave, campaignId }: ContactSe
               <h3 className="text-lg font-semibold">
                 Available Contacts
               </h3>
-              <span className="text-gray-400">
-                {contacts.length} contacts
-              </span>
+              <div className="flex items-center space-x-4">
+                <Input
+                  type="text"
+                  placeholder="Search contacts..."
+                  value={searchTerm}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchTerm(e.target.value)}
+                  className="w-64"
+                />
+                <span className="text-gray-400">
+                  {selectedContactIds.size} selected / {contacts.length} total
+                </span>
+              </div>
             </div>
 
             {loading ? (
@@ -165,6 +215,13 @@ export function ContactSelectionModal({ onClose, onSave, campaignId }: ContactSe
                 <table className="w-full">
                   <thead>
                     <tr className="text-left border-b border-gray-700">
+                      <th className="pb-2">
+                        <Checkbox
+                          checked={allFilteredSelected}
+                          onCheckedChange={handleSelectAll}
+                          aria-label="Select all contacts"
+                        />
+                      </th>
                       <th className="pb-2">Name</th>
                       <th className="pb-2">Email</th>
                       <th className="pb-2">Company</th>
@@ -172,8 +229,15 @@ export function ContactSelectionModal({ onClose, onSave, campaignId }: ContactSe
                     </tr>
                   </thead>
                   <tbody>
-                    {contacts.map(contact => (
+                    {filteredContacts.map(contact => (
                       <tr key={contact.id} className="border-b border-gray-700">
+                        <td className="py-2">
+                          <Checkbox
+                            checked={selectedContactIds.has(contact.id)}
+                            onCheckedChange={() => handleSelectContact(contact.id)}
+                            aria-label={`Select ${contact.email}`}
+                          />
+                        </td>
                         <td className="py-2">
                           {contact.first_name} {contact.last_name}
                         </td>
@@ -209,9 +273,9 @@ export function ContactSelectionModal({ onClose, onSave, campaignId }: ContactSe
           </Button>
           <Button
             onClick={handleSave}
-            disabled={saving || contacts.length === 0}
+            disabled={saving || selectedContactIds.size === 0}
           >
-            {saving ? 'Adding Contacts...' : `Add ${contacts.length} Contacts`}
+            {saving ? 'Adding Contacts...' : `Add ${selectedContactIds.size} Contacts`}
           </Button>
         </div>
       </Card>

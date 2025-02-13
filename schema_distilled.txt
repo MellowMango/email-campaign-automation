@@ -1,0 +1,127 @@
+Below is a distilled, high‐level outline of the overall schema structure as extracted from the dump. (Note that many details such as indexes, privileges, and default privileges have been omitted for clarity.)
+
+Schema: _realtime
+	•	Tables:
+	•	extensions: Contains metadata/settings for realtime extensions.
+	•	schema_migrations: Stores migration versions for the realtime layer.
+	•	tenants: Holds tenant configuration and limits (e.g. max events, JWT settings).
+
+Schema: auth
+	•	Tables:
+	•	audit_log_entries: Audit trail for user actions.
+	•	flow_state: Stores metadata for PKCE logins.
+	•	identities: Maps external identity provider data to internal users.
+	•	instances: Manages multi-site user configurations.
+	•	mfa_amr_claims: Stores multi‐factor authentication method claims.
+	•	mfa_challenges: Records challenge requests for MFA.
+	•	mfa_factors: Holds metadata for MFA factors (e.g. totp, webauthn, phone).
+	•	one_time_tokens: Tokens for actions such as confirmations, recovery, etc.
+	•	refresh_tokens: Tokens used to refresh JWTs.
+	•	saml_providers: Configurations for SAML identity provider connections.
+	•	saml_relay_states: Contains relay state information for SAML logins.
+	•	schema_migrations: Tracks updates to the auth system.
+	•	sessions: Stores active session data.
+	•	sso_domains: Maps SSO domains to providers.
+	•	sso_providers: Additional SSO provider information.
+	•	users: The core table for user login data.
+	•	Functions:
+	•	email(), jwt(), role(), uid(): (Legacy and current functions for extracting JWT claims.)
+	•	Row-Level Security & Policies:
+	•	Various RLS policies and triggers (e.g. on_auth_user_created) ensure that users can only view and modify their own records.
+
+Schema: extensions
+	•	Functions:
+	•	A suite of cryptographic and utility functions such as:
+	•	algorithm_sign, armor, dearmor
+	•	crypt, decrypt, decrypt_iv
+	•	digest, encrypt, encrypt_iv
+	•	gen_random_bytes, gen_random_uuid, gen_salt
+	•	hmac, uuid_generate_* functions, verify, etc.
+	•	Functions to grant access to other extensions/features (e.g. grant_pg_cron_access, grant_pg_graphql_access, grant_pg_net_access).
+	•	Event Triggers:
+	•	Triggers such as issue_pg_cron_access and issue_pg_graphql_access run after DDL changes.
+	•	Tables:
+	•	Extension objects like pg_stat_statements (for tracking SQL performance).
+
+Schema: graphql / graphql_public
+	•	graphql_public:
+	•	Functions:
+	•	A public wrapper function (graphql()) that exposes GraphQL queries.
+	•	(The “graphql” schema itself is likely used for internal GraphQL support.)
+
+Schema: net
+	•	Functions:
+	•	http_get and http_post: Asynchronous HTTP functions for external calls.
+
+Schema: pgbouncer
+	•	Functions:
+	•	get_auth: A function used by PgBouncer for authentication.
+
+Schema: pgsodium
+	•	Functions:
+	•	crypto_aead_det_decrypt, crypto_aead_det_encrypt, crypto_aead_det_keygen: For modern cryptography operations.
+	•	Tables:
+	•	(Supporting tables such as decrypted_key, masking_rule, and mask_columns may be present for key management and masking.)
+
+Schema: realtime
+	•	Tables:
+	•	messages: Stores realtime messages for broadcast (partitioned by insertion timestamp).
+	•	schema_migrations: Realtime-specific migration tracking.
+	•	subscription: Manages realtime subscription configurations including filters and claims.
+	•	Functions:
+	•	apply_rls: Applies row-level security checks on change data.
+	•	broadcast_changes: Packages and sends change notifications.
+	•	build_prepared_statement_sql: Constructs SQL for testing visibility of changes.
+	•	"cast": Casts values safely for change processing.
+	•	check_equality_op: Evaluates user-defined filter operators.
+	•	is_visible_through_filters: Determines whether a record is visible given subscription filters.
+	•	list_changes: Retrieves changes (using logical decoding).
+	•	quote_wal2json: Prepares entity names for WAL-to-JSON conversion.
+	•	send: Enqueues a message for broadcast.
+	•	subscription_check_filters: Validates filters when a subscription is created or updated.
+	•	to_regrole: Converts role names to PostgreSQL role types.
+	•	topic: Retrieves the current realtime topic.
+	•	Event Triggers:
+	•	pgrst_ddl_watch and pgrst_drop_watch: Monitor DDL changes to reload schema as needed.
+	•	Additional event triggers (e.g. issue_graphql_placeholder) support dynamic behavior after certain DDL events.
+
+Schema: storage
+	•	Tables:
+	•	buckets: Definitions for storage buckets.
+	•	migrations: Tracks schema migrations for storage.
+	•	objects: Stores file objects and metadata (with generated path tokens).
+	•	s3_multipart_uploads: Tracks multipart upload sessions.
+	•	s3_multipart_uploads_parts: Stores parts for multipart uploads.
+	•	Functions:
+	•	can_insert_object: Checks whether an object can be inserted into storage.
+	•	extension, filename, foldername: Utility functions for parsing object names.
+	•	get_size_by_bucket: Aggregates storage size per bucket.
+	•	list_multipart_uploads_with_delimiter and list_objects_with_delimiter: Functions to support S3-like listing operations.
+	•	operation: Retrieves the current storage operation context.
+	•	search: Supports searching and paginating objects.
+	•	update_updated_at_column: A trigger function to update the updated_at timestamp.
+	•	Triggers:
+	•	Trigger on objects to update timestamps on change.
+
+Schema: supabase_functions
+	•	Tables:
+	•	hooks: Audit trail of function hook invocations.
+	•	migrations: Tracks schema changes for Supabase functions.
+	•	Functions:
+	•	http_request: A trigger function to perform HTTP calls (using net.http_get/ http_post) and log the request.
+
+Schema: supabase_migrations
+	•	Tables:
+	•	schema_migrations: Used for managing Supabase-specific migrations.
+
+Schema: vault
+	•	Views:
+	•	decrypted_secrets: A view that decrypts stored secrets using functions from pgsodium.
+	•	Triggers:
+	•	A trigger (e.g. secrets_encrypt_secret_secret) automatically encrypts secrets before storage.
+
+Additional Notes:
+	•	Row-Level Security: Most tables (especially in auth, realtime, and storage) have RLS enabled along with defined policies to control which roles (such as anon, authenticated, service_role, and dashboard_user) can perform specific operations.
+	•	Default Privileges: The dump sets up default privileges for roles across schemas so that functions, tables, and sequences have appropriate access.
+
+This outline represents a “consolidated schema structure” showing the main schemas and the types of objects they contain, which should provide a distilled context of the overall database design.

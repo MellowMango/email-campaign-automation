@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase/client';
-import type { Campaign } from '../lib/supabase/client';
+import type { Campaign } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 
 interface CampaignOptions {
@@ -11,10 +11,16 @@ interface CampaignOptions {
   campaign_type?: string;
   duration?: number;
   emails_per_week?: number;
+  sequence_type: 'awareness' | 'conversion' | 'nurture';
   features?: {
     adaptive_sequences?: boolean;
     auto_responder?: boolean;
     lead_scoring?: boolean;
+  };
+  cta_links?: {
+    awareness: string;
+    conversion: string;
+    nurture: string;
   };
 }
 
@@ -33,7 +39,7 @@ export function useCampaigns() {
           .from('campaigns')
           .select('*')
           .eq('user_id', user.id)
-          .order('created_at', { ascending: false });
+          .order('updated_at', { ascending: false });
 
         if (error) throw error;
         setCampaigns(data as Campaign[]);
@@ -93,6 +99,7 @@ export function useCampaigns() {
           campaign_type: options?.campaign_type || 'manual',
           duration: options?.duration || 30,
           emails_per_week: options?.emails_per_week || 2,
+          sequence_type: options?.sequence_type,
           features: options?.features || {},
           analytics: {
             sent: 0,

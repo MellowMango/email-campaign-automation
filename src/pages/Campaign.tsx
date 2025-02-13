@@ -58,6 +58,7 @@ export default function Campaign() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [editingDetails, setEditingDetails] = useState(false);
   const [campaignDetails, setCampaignDetails] = useState<Partial<Campaign>>({});
+  const [isGeneratingSequence, setIsGeneratingSequence] = useState(false);
   const [startDate] = useState(() => {
     const date = new Date();
     date.setFullYear(date.getFullYear() - 1);
@@ -440,33 +441,44 @@ Include the CTA link in a way that naturally flows with the content.`;
     if (!campaign || !campaignDetails) return;
     
     try {
+      const updates = {
+        user_id: campaign.user_id,
+        name: campaignDetails.name || campaign.name,
+        description: campaignDetails.description || campaign.description,
+        target_audience: campaignDetails.target_audience || campaign.target_audience,
+        goals: campaignDetails.goals || campaign.goals,
+        value_proposition: campaignDetails.value_proposition || campaign.value_proposition,
+        email_tone: (campaignDetails.email_tone || campaign.email_tone) as EmailTone,
+        campaign_type: (campaignDetails.campaign_type || campaign.campaign_type) as CampaignType,
+        duration: campaignDetails.duration ?? campaign.duration,
+        emails_per_week: campaignDetails.emails_per_week ?? campaign.emails_per_week,
+        sequence_type: campaignDetails.sequence_type || campaign.sequence_type,
+        features: {
+          adaptive_sequences: campaignDetails.features?.adaptive_sequences ?? campaign.features?.adaptive_sequences ?? false,
+          auto_responder: campaignDetails.features?.auto_responder ?? campaign.features?.auto_responder ?? false,
+          lead_scoring: campaignDetails.features?.lead_scoring ?? campaign.features?.lead_scoring ?? false
+        },
+        cta_links: campaignDetails.cta_links || campaign.cta_links,
+        status: campaign.status,
+        updated_at: new Date().toISOString()
+      };
+
       const { error } = await supabase
         .from('campaigns')
-        .update({
-          name: campaignDetails.name || campaign.name,
-          description: campaignDetails.description,
-          target_audience: campaignDetails.target_audience,
-          goals: campaignDetails.goals,
-          value_proposition: campaignDetails.value_proposition,
-          email_tone: campaignDetails.email_tone as EmailTone,
-          campaign_type: campaignDetails.campaign_type as CampaignType,
-          duration: campaignDetails.duration,
-          emails_per_week: campaignDetails.emails_per_week,
-          features: {
-            adaptive_sequences: campaignDetails.features?.adaptive_sequences ?? false,
-            auto_responder: campaignDetails.features?.auto_responder ?? false,
-            lead_scoring: campaignDetails.features?.lead_scoring ?? false
-          },
-          cta_links: campaignDetails.cta_links
-        })
+        .update(updates)
         .eq('id', campaign.id);
 
       if (error) throw error;
       
-      setCampaign(prev => prev ? { ...prev, ...campaignDetails } : null);
+      // Immediately update the local campaign state with all the changes
+      setCampaign(prev => prev ? { ...prev, ...updates } : null);
       setEditingDetails(false);
       setSuccessMessage('Campaign details updated successfully');
+      
+      // Reset campaign details after successful update
+      setCampaignDetails({});
     } catch (err) {
+      console.error('Update error:', err);
       setError(err instanceof Error ? err.message : 'Failed to update campaign details');
     }
   };
@@ -800,6 +812,31 @@ Include the CTA link in a way that naturally flows with the content.`;
                   </div>
 
                   <div>
+                    <label className="block text-sm font-medium mb-2">Sequence Type</label>
+                    {editingDetails ? (
+                      <select
+                        value={campaignDetails.sequence_type || campaign.sequence_type || 'awareness'}
+                        onChange={(e) => setCampaignDetails(prev => ({ 
+                          ...prev, 
+                          sequence_type: e.target.value as 'awareness' | 'conversion' | 'nurture'
+                        }))}
+                        className="input w-full"
+                      >
+                        <option value="awareness">Awareness & Education</option>
+                        <option value="conversion">Direct Conversion</option>
+                        <option value="nurture">Relationship Nurturing</option>
+                      </select>
+                    ) : (
+                      <p className="text-gray-300">
+                        {campaign.sequence_type === 'awareness' ? 'Awareness & Education' :
+                         campaign.sequence_type === 'conversion' ? 'Direct Conversion' :
+                         campaign.sequence_type === 'nurture' ? 'Relationship Nurturing' :
+                         'Not set'}
+                      </p>
+                    )}
+                  </div>
+
+                  <div>
                     <label className="block text-sm font-medium mb-2">Duration (days)</label>
                     {editingDetails ? (
                       <input
@@ -952,6 +989,28 @@ Include the CTA link in a way that naturally flows with the content.`;
 
         {activeTab === 'emails' && (
           <>
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-2xl font-bold">Email Sequence</h2>
+              <Button 
+                onClick={() => setShowSequencePlanner(true)}
+                disabled={!campaign.sequence_type || isGeneratingSequence}
+              >
+                {isGeneratingSequence ? (
+                  <span className="flex items-center">
+                    <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Generating...
+                  </span>
+                ) : 'Generate Sequence'}
+              </Button>
+            </div>
+            {!campaign.sequence_type && (
+              <div className="mb-6 p-4 bg-yellow-900/50 border border-yellow-500/50 rounded-lg text-yellow-200">
+                Please select a sequence type in the campaign details before generating a sequence.
+              </div>
+            )}
             {/* Calendar View */}
             <Card className="p-6 mb-6">
               <h3 className="text-xl font-semibold mb-6">Email Calendar</h3>
@@ -1357,6 +1416,15 @@ Include the CTA link in a way that naturally flows with the content.`;
             campaignId={id}
             onClose={() => setShowContactSelection(false)}
             onSave={handleAddContacts}
+          />
+        )}
+
+        {showSequencePlanner && campaign && (
+          <EmailSequencePlanner
+            campaign={campaign}
+            onClose={() => setShowSequencePlanner(false)}
+            isGenerating={isGeneratingSequence}
+            setIsGenerating={setIsGeneratingSequence}
           />
         )}
       </div>

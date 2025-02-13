@@ -1,12 +1,12 @@
 import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useCampaigns } from '../hooks/useCampaigns';
 import { Button } from '../components/shadcn/Button';
 import { Card } from '../components/shadcn/Card';
 import { CampaignSetup, CampaignSetupData } from '../components/campaign/CampaignSetup';
 import { supabase } from '../lib/supabase/client';
-import type { Contact } from '../lib/supabase/client';
+import type { Contact } from '../types';
 
 export default function Dashboard() {
   const { user } = useAuth();
@@ -15,6 +15,7 @@ export default function Dashboard() {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [totalContacts, setTotalContacts] = useState(0);
   const [contactsLoading, setContactsLoading] = useState(true);
+  const navigate = useNavigate();
 
   // Fetch contacts when component mounts
   useEffect(() => {
@@ -53,7 +54,7 @@ export default function Dashboard() {
 
   const handleCreateCampaign = async (data: CampaignSetupData) => {
     try {
-      await createCampaign(
+      const campaign = await createCampaign(
         data.name,
         data.description,
         {
@@ -64,14 +65,22 @@ export default function Dashboard() {
           campaign_type: data.campaignType,
           duration: data.duration,
           emails_per_week: data.emailsPerWeek,
+          sequence_type: data.sequence_type,
           features: {
             adaptive_sequences: data.enableAdaptiveSequences,
             auto_responder: data.enableAutoResponder,
             lead_scoring: data.enableLeadScoring,
+          },
+          cta_links: {
+            awareness: data.ctaLinks.awareness,
+            conversion: data.ctaLinks.conversion,
+            nurture: data.ctaLinks.nurture
           }
         }
       );
       setIsCreating(false);
+      // Navigate to the new campaign
+      navigate(`/campaign/${campaign.id}`);
     } catch (err) {
       console.error('Failed to create campaign:', err);
     }
@@ -173,7 +182,7 @@ export default function Dashboard() {
                         {campaign.status.charAt(0).toUpperCase() + campaign.status.slice(1)}
                       </span>
                       <span className="text-sm text-gray-400">
-                        {new Date(campaign.created_at).toLocaleDateString()}
+                        {new Date(campaign.updated_at).toLocaleDateString()}
                       </span>
                     </div>
                   </Card>

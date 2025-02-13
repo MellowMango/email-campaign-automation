@@ -9,6 +9,7 @@ const Landing = React.lazy(() => import('./pages/Landing'));
 const Dashboard = React.lazy(() => import('./pages/Dashboard'));
 const Auth = React.lazy(() => import('./pages/Auth'));
 const Campaign = React.lazy(() => import('./pages/Campaign'));
+const Campaigns = React.lazy(() => import('./pages/Campaigns'));
 const Contacts = React.lazy(() => import('./pages/Contacts'));
 const Settings = React.lazy(() => import('./pages/Settings'));
 
@@ -52,6 +53,14 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <Dashboard />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/campaigns"
+                element={
+                  <ProtectedRoute>
+                    <Campaigns />
                   </ProtectedRoute>
                 }
               />

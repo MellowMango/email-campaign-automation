@@ -97,6 +97,7 @@ export interface Campaign {
     conversion: string;
     nurture: string;
   };
+  sequence_type: 'awareness' | 'conversion' | 'nurture';
 }
 
 export interface Contact {

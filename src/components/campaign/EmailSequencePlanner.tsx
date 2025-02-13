@@ -4,12 +4,14 @@ import dayGridPlugin from '@fullcalendar/daygrid';
 import interactionPlugin from '@fullcalendar/interaction';
 import { Button } from '../shadcn/Button';
 import { Card } from '../shadcn/Card';
-import type { Campaign } from '../../lib/supabase/client';
+import type { Campaign } from '../../types';
 import { supabase } from '../../lib/supabase/client';
 
 interface EmailSequencePlannerProps {
   campaign: Campaign;
   onClose: () => void;
+  isGenerating: boolean;
+  setIsGenerating: (isGenerating: boolean) => void;
 }
 
 interface EmailTopic {
@@ -32,7 +34,13 @@ interface OpenAIResponse {
   }>;
 }
 
-const SEQUENCE_TYPES = {
+type SequenceType = 'awareness' | 'conversion' | 'nurture';
+
+const SEQUENCE_TYPES: Record<SequenceType, {
+  name: string;
+  description: string;
+  stages: string[];
+}> = {
   awareness: {
     name: 'Awareness & Education',
     description: 'Focus on educating prospects about their problems and your solutions',
@@ -50,11 +58,10 @@ const SEQUENCE_TYPES = {
   }
 };
 
-export function EmailSequencePlanner({ campaign, onClose }: EmailSequencePlannerProps) {
+export function EmailSequencePlanner({ campaign, onClose, isGenerating, setIsGenerating }: EmailSequencePlannerProps) {
   const [topics, setTopics] = useState<EmailTopic[]>([]);
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [selectedType, setSelectedType] = useState<keyof typeof SEQUENCE_TYPES>('awareness');
+  const sequenceType = campaign.sequence_type;
 
   // Calculate campaign start and end dates
   const startDate = new Date();
@@ -63,12 +70,12 @@ export function EmailSequencePlanner({ campaign, onClose }: EmailSequencePlanner
 
   // Generate email topics based on campaign details
   const generateTopics = async () => {
-    setLoading(true);
+    setIsGenerating(true);
     setError(null);
 
     try {
       console.log('Generating topics for campaign:', {
-        type: selectedType,
+        type: sequenceType,
         duration: campaign.duration,
         emailsPerWeek: campaign.emails_per_week
       });
@@ -97,7 +104,7 @@ Example:
               },
               {
                 role: 'user',
-                content: `Create a ${selectedType} email sequence following these stages: ${SEQUENCE_TYPES[selectedType].stages.join(' → ')}
+                content: `Create a ${sequenceType} email sequence following these stages: ${SEQUENCE_TYPES[sequenceType].stages.join(' → ')}
 
 Campaign Details:
 Name: ${campaign.name}
@@ -192,7 +199,7 @@ Return the JSON array of email topics and descriptions.`
       console.error('Generation error:', err);
       setError(err instanceof Error ? err.message : 'Failed to generate topics');
     } finally {
-      setLoading(false);
+      setIsGenerating(false);
     }
   };
 
@@ -209,14 +216,14 @@ Return the JSON array of email topics and descriptions.`
             scheduled_at: new Date(topic.date).toISOString(),
             status: 'pending',
             metadata: {
-              sequence_type: selectedType,
+              sequence_type: sequenceType,
               topic: {
                 name: topic.topic,
                 description: topic.description,
-                stage: SEQUENCE_TYPES[selectedType].stages[
+                stage: SEQUENCE_TYPES[sequenceType].stages[
                   Math.floor(
                     (topics.indexOf(topic) / topics.length) * 
-                    SEQUENCE_TYPES[selectedType].stages.length
+                    SEQUENCE_TYPES[sequenceType].stages.length
                   )
                 ]
               }
@@ -232,60 +239,40 @@ Return the JSON array of email topics and descriptions.`
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4">
-      <Card className="w-full max-w-6xl max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+      <Card className="w-full max-w-6xl max-h-[90vh] overflow-y-auto bg-gray-900 border-gray-800">
         <div className="mb-6">
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-2xl font-bold">Email Sequence Planner</h2>
             <Button variant="secondary" onClick={onClose}>Close</Button>
           </div>
           <p className="text-gray-400">
-            Plan your email sequence for {campaign.duration} days with {campaign.emails_per_week} emails per week
+            Plan your {SEQUENCE_TYPES[sequenceType].name.toLowerCase()} sequence for {campaign.duration} days with {campaign.emails_per_week} emails per week
           </p>
+          <div className="mt-4">
+            <h4 className="text-sm font-medium mb-2">Sequence Stages:</h4>
+            <div className="flex flex-wrap gap-2">
+              {SEQUENCE_TYPES[sequenceType].stages.map((stage: string, index: number) => (
+                <span
+                  key={stage}
+                  className="px-2 py-1 bg-background-secondary rounded text-sm text-gray-300"
+                >
+                  {index + 1}. {stage}
+                </span>
+              ))}
+            </div>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           <div>
-            <div className="mb-6">
-              <label className="block text-sm font-medium mb-2">
-                Sequence Type
-              </label>
-              <select
-                value={selectedType}
-                onChange={(e) => setSelectedType(e.target.value as keyof typeof SEQUENCE_TYPES)}
-                className="w-full p-2 bg-background-secondary rounded-lg border border-gray-700 focus:outline-none focus:border-primary"
-              >
-                {Object.entries(SEQUENCE_TYPES).map(([key, value]) => (
-                  <option key={key} value={key}>
-                    {value.name}
-                  </option>
-                ))}
-              </select>
-              <p className="mt-2 text-sm text-gray-400">
-                {SEQUENCE_TYPES[selectedType].description}
-              </p>
-              <div className="mt-4">
-                <h4 className="text-sm font-medium mb-2">Sequence Stages:</h4>
-                <div className="flex flex-wrap gap-2">
-                  {SEQUENCE_TYPES[selectedType].stages.map((stage, index) => (
-                    <span
-                      key={stage}
-                      className="px-2 py-1 bg-background-secondary rounded text-sm text-gray-300"
-                    >
-                      {index + 1}. {stage}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            </div>
-
             <div className="mb-4 flex justify-between items-center">
               <h3 className="text-xl font-semibold">Email Topics</h3>
               <Button
                 onClick={generateTopics}
-                disabled={loading}
+                disabled={isGenerating}
               >
-                {loading ? (
+                {isGenerating ? (
                   <span className="flex items-center">
                     <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
@@ -293,7 +280,7 @@ Return the JSON array of email topics and descriptions.`
                     </svg>
                     Generating...
                   </span>
-                ) : 'Generate Topics'}
+                ) : 'Generate Sequence'}
               </Button>
             </div>
 
