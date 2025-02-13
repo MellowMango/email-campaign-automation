@@ -71,6 +71,8 @@ export default function Campaign() {
     return date;
   });
 
+  const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
+
   // Auto-dismiss success message after 6.5 seconds
   useEffect(() => {
     if (successMessage) {
@@ -480,6 +482,175 @@ Include the CTA link in a way that naturally flows with the content.`;
     } catch (err) {
       console.error('Update error:', err);
       setError(err instanceof Error ? err.message : 'Failed to update campaign details');
+    }
+  };
+
+  const handleGenerateSequence = async () => {
+    if (!campaign) {
+      setError('Campaign not found');
+      return;
+    }
+
+    setIsGeneratingSequence(true);
+    try {
+      const startDate = new Date(newEmail.scheduled_at);
+      const endDate = new Date(startDate);
+      endDate.setDate(startDate.getDate() + campaign.duration);
+
+      interface SequenceEmail {
+        id: string;
+        title: string;
+        start: string;
+        end: string;
+        extendedProps: {
+          status: 'ready' | 'pending' | 'sent';
+          content: string;
+          subject: string;
+        };
+        className: string;
+      }
+
+      // Calculate total number of emails and interval between them
+      const totalEmails = Math.floor(campaign.duration / 7 * campaign.emails_per_week);
+      const daysInterval = Math.floor(campaign.duration / totalEmails);
+
+      // Get sequence stages based on campaign type
+      const stages = {
+        awareness: ['Problem Awareness', 'Solution Education', 'Brand Introduction', 'Value Proposition', 'Social Proof'],
+        conversion: ['Value Proposition', 'Feature Showcase', 'Case Studies', 'Offer Introduction', 'Call to Action'],
+        nurture: ['Industry Insights', 'Best Practices', 'Tips & Tricks', 'Success Stories', 'Thought Leadership']
+      }[campaign.sequence_type];
+
+      // Generate sequence
+      const sequence: SequenceEmail[] = [];
+      const emailsToCreate = [];
+
+      for (let i = 0; i < totalEmails; i++) {
+        const emailDate = new Date(startDate);
+        emailDate.setDate(emailDate.getDate() + i * daysInterval);
+        
+        // Calculate which stage this email should be in
+        const stageIndex = Math.floor((i / totalEmails) * stages.length);
+        const stage = stages[stageIndex];
+
+        // Generate content for this email
+        const prompt = `Generate content for email ${i + 1} of ${totalEmails} in the ${campaign.sequence_type} sequence:
+Campaign Name: ${campaign.name}
+Description: ${campaign.description || 'N/A'}
+Target Audience: ${campaign.target_audience || 'N/A'}
+Goals: ${campaign.goals || 'N/A'}
+Value Proposition: ${campaign.value_proposition || 'N/A'}
+Current Stage: ${stage}
+CTA Link: ${campaign.cta_links[campaign.sequence_type]}
+
+Requirements:
+1. Create a subject line and content that aligns with the current stage (${stage})
+2. Focus on the target audience's needs
+3. Build progressively towards the campaign goals
+4. Maintain ${campaign.email_tone || 'professional'} tone
+5. Include the CTA naturally based on the sequence type and stage`;
+
+        const { subject, content } = await generateEmailContent(
+          prompt,
+          campaign.target_audience || 'N/A',
+          campaign.email_tone || 'professional',
+          campaign.company_name
+        );
+
+        sequence.push({
+          id: `seq-${emailDate.toISOString().split('T')[0]}`,
+          title: subject,
+          start: emailDate.toISOString(),
+          end: emailDate.toISOString(),
+          extendedProps: {
+            status: 'pending',
+            content,
+            subject
+          },
+          className: 'event-pending'
+        });
+
+        emailsToCreate.push({
+          campaign_id: campaign.id,
+          subject,
+          content,
+          scheduled_at: emailDate.toISOString(),
+          status: 'pending',
+          metadata: {
+            sequence_type: campaign.sequence_type,
+            topic: {
+              name: subject,
+              description: content.substring(0, 100) + '...',
+              stage
+            }
+          }
+        });
+      }
+
+      // Insert all emails into the database
+      const { error: insertError } = await supabase
+        .from('emails')
+        .insert(emailsToCreate.map(email => ({
+          ...email,
+          status: 'draft',
+          metadata: {
+            sequence_type: campaign.sequence_type,
+            topic: {
+              name: email.metadata.topic.name,
+              description: email.metadata.topic.description,
+              stage: email.metadata.topic.stage
+            }
+          }
+        })));
+
+      if (insertError) throw insertError;
+
+      // Refresh emails list
+      const { data: updatedEmails, error: fetchError } = await supabase
+        .from('emails')
+        .select('*')
+        .eq('campaign_id', campaign.id)
+        .order('scheduled_at', { ascending: true });
+
+      if (fetchError) throw fetchError;
+      setEmails(updatedEmails);
+
+      setSuccessMessage('Email sequence generated successfully');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to generate sequence');
+    } finally {
+      setIsGeneratingSequence(false);
+    }
+  };
+
+  const handleDeleteEmail = async (emailId: string) => {
+    try {
+      const { error } = await supabase
+        .from('emails')
+        .delete()
+        .eq('id', emailId);
+
+      if (error) throw error;
+      setEmails(prev => prev.filter(email => email.id !== emailId));
+      setSuccessMessage('Email deleted successfully');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete email');
+    }
+  };
+
+  const handleDeleteAllEmails = async () => {
+    try {
+      const { error } = await supabase
+        .from('emails')
+        .delete()
+        .eq('campaign_id', id);
+
+      if (error) throw error;
+      setEmails([]);
+      setShowDeleteConfirmation(false);
+      setSuccessMessage('All emails deleted successfully');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete emails');
     }
   };
 
@@ -990,232 +1161,129 @@ Include the CTA link in a way that naturally flows with the content.`;
         {activeTab === 'emails' && (
           <>
             <div className="flex justify-between items-center mb-6">
-              <h2 className="text-2xl font-bold">Email Sequence</h2>
-              <Button 
-                onClick={() => setShowSequencePlanner(true)}
-                disabled={!campaign.sequence_type || isGeneratingSequence}
-              >
-                {isGeneratingSequence ? (
-                  <span className="flex items-center">
-                    <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                    Generating...
-                  </span>
-                ) : 'Generate Sequence'}
-              </Button>
+              <div>
+                <h2 className="text-2xl font-bold">Email Sequence</h2>
+                <p className="text-sm text-gray-400 mt-1">
+                  {campaign.duration} days campaign with {campaign.emails_per_week} emails per week
+                </p>
+              </div>
+              <div className="flex items-center gap-4">
+                {emails.length > 0 && (
+                  <Button 
+                    variant="secondary"
+                    onClick={() => setShowDeleteConfirmation(true)}
+                    className="bg-red-900 hover:bg-red-800 text-red-100"
+                  >
+                    Delete All Emails
+                  </Button>
+                )}
+                <div>
+                  <label className="block text-sm font-medium mb-2">Start Date</label>
+                  <input
+                    type="datetime-local"
+                    className="input bg-gray-800 border-gray-700 text-white"
+                    min={new Date().toISOString().split('.')[0]}
+                    onChange={(e) => {
+                      const selectedDate = new Date(e.target.value);
+                      setNewEmail(prev => ({
+                        ...prev,
+                        scheduled_at: selectedDate.toISOString()
+                      }));
+                    }}
+                  />
+                </div>
+                <Button 
+                  onClick={handleGenerateSequence}
+                  disabled={!campaign.sequence_type || isGeneratingSequence || !newEmail.scheduled_at}
+                >
+                  {isGeneratingSequence ? (
+                    <span className="flex items-center">
+                      <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      Generating...
+                    </span>
+                  ) : 'Generate Sequence'}
+                </Button>
+              </div>
             </div>
             {!campaign.sequence_type && (
               <div className="mb-6 p-4 bg-yellow-900/50 border border-yellow-500/50 rounded-lg text-yellow-200">
                 Please select a sequence type in the campaign details before generating a sequence.
               </div>
             )}
+            {!newEmail.scheduled_at && campaign.sequence_type && (
+              <div className="mb-6 p-4 bg-yellow-900/50 border border-yellow-500/50 rounded-lg text-yellow-200">
+                Please select a start date for your campaign sequence.
+              </div>
+            )}
             {/* Calendar View */}
             <Card className="p-6 mb-6">
-              <h3 className="text-xl font-semibold mb-6">Email Calendar</h3>
-              <div className="h-[600px] bg-background rounded-lg">
-                <style>
-                  {`
-                    /* Calendar Container */
-                    .fc {
-                      --fc-border-color: rgba(75, 85, 99, 0.15);
-                      --fc-button-bg-color: #4f46e5;
-                      --fc-button-border-color: #4f46e5;
-                      --fc-button-hover-bg-color: #4338ca;
-                      --fc-button-hover-border-color: #4338ca;
-                      --fc-button-active-bg-color: #3730a3;
-                      --fc-button-active-border-color: #3730a3;
-                      --fc-today-bg-color: rgba(79, 70, 229, 0.2);
-                      --fc-page-bg-color: transparent;
-                      background: transparent;
-                    }
-
-                    /* Header Styling */
-                    .fc .fc-toolbar {
-                      padding: 0.75rem 1rem;
-                      margin-bottom: 0.5rem !important;
-                    }
-
-                    .fc .fc-toolbar-title {
-                      font-size: 1.25rem;
-                      font-weight: 600;
-                      color: #e5e7eb;
-                    }
-
-                    /* Button Styling */
-                    .fc .fc-button {
-                      padding: 0.375rem 0.75rem;
-                      font-size: 0.875rem;
-                      border-radius: 0.375rem;
-                      font-weight: 500;
-                      transition: all 0.15s ease;
-                    }
-
-                    .fc .fc-button:focus {
-                      box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.4);
-                    }
-
-                    .fc .fc-button-group {
-                      gap: 0.25rem;
-                    }
-
-                    /* Cell Styling */
-                    .fc .fc-daygrid-day {
-                      min-height: 120px;
-                      transition: background-color 0.15s ease;
-                    }
-
-                    .fc .fc-daygrid-day.fc-day-today {
-                      background-color: var(--fc-today-bg-color);
-                    }
-
-                    .fc .fc-daygrid-day.fc-day-today .fc-daygrid-day-number {
-                      background: rgba(79, 70, 229, 0.3);
-                      color: #fff;
-                      font-weight: 600;
-                      border-radius: 0.375rem;
-                    }
-
-                    .fc .fc-daygrid-day-frame {
-                      padding: 0.375rem;
-                      min-height: 100%;
-                    }
-
-                    /* Event Styling */
-                    .fc-event {
-                      border: none;
-                      border-radius: 0.25rem;
-                      padding: 0.25rem 0.5rem;
-                      margin: 0.125rem 0;
-                      font-size: 0.75rem;
-                      line-height: 1.4;
-                      transition: transform 0.15s ease;
-                      cursor: pointer;
-                      white-space: normal !important;
-                      overflow: hidden;
-                      text-overflow: ellipsis;
-                      display: -webkit-box;
-                      -webkit-line-clamp: 2;
-                      -webkit-box-orient: vertical;
-                    }
-
-                    .fc-daygrid-event-harness {
-                      margin-top: 0.25rem !important;
-                    }
-
-                    .fc-event:hover {
-                      transform: translateY(-1px);
-                    }
-
-                    /* More Events Link */
-                    .fc-daygrid-more-link {
-                      font-size: 0.75rem;
-                      color: #e5e7eb;
-                      background: rgba(79, 70, 229, 0.2);
-                      padding: 0.25rem 0.5rem;
-                      border-radius: 0.25rem;
-                      margin-top: 0.375rem;
-                      font-weight: 500;
-                    }
-
-                    .fc-daygrid-more-link:hover {
-                      background: rgba(79, 70, 229, 0.3);
-                      color: #fff;
-                    }
-
-                    /* Status-based Event Colors */
-                    .event-draft {
-                      background-color: rgba(156, 163, 175, 0.15) !important;
-                      border-left: 2px solid #9ca3af !important;
-                    }
-
-                    .event-ready {
-                      background-color: rgba(79, 70, 229, 0.15) !important;
-                      border-left: 2px solid #4f46e5 !important;
-                    }
-
-                    .event-sent {
-                      background-color: rgba(16, 185, 129, 0.15) !important;
-                      border-left: 2px solid #10b981 !important;
-                    }
-
-                    .event-failed {
-                      background-color: rgba(239, 68, 68, 0.15) !important;
-                      border-left: 2px solid #ef4444 !important;
-                    }
-                  `}
-                </style>
-                <FullCalendar
-                  plugins={[dayGridPlugin, interactionPlugin]}
-                  initialView="dayGridMonth"
-                  events={emails.map(email => ({
+              <FullCalendar
+                plugins={[dayGridPlugin, interactionPlugin]}
+                initialView="dayGridMonth"
+                events={emails
+                  .filter(email => email.scheduled_at)
+                  .map(email => ({
                     id: email.id,
                     title: email.subject,
-                    start: email.scheduled_at || email.created_at,
-                    end: email.scheduled_at || email.created_at,
+                    start: new Date(email.scheduled_at!).toISOString(),
+                    end: new Date(email.scheduled_at!).toISOString(),
+                    className: `event-${email.status}`,
                     extendedProps: {
                       status: email.status,
-                      content: email.content
-                    },
-                    className: `event-${email.status}`
+                      content: email.content,
+                      metadata: email.metadata
+                    }
                   }))}
-                  height="600px"
-                  headerToolbar={{
-                    left: 'prevYear,prev,next,nextYear',
-                    center: 'title',
-                    right: 'today'
-                  }}
-                  dayMaxEvents={3}
-                  moreLinkContent={(args) => `+${args.num} more`}
-                  fixedWeekCount={false}
-                  showNonCurrentDates={true}
-                  titleFormat={{ year: 'numeric', month: 'long' }}
-                  buttonText={{
-                    today: 'Today',
-                    prevYear: '<<',
-                    nextYear: '>>',
-                    prev: '<',
-                    next: '>'
-                  }}
-                  eventDidMount={(info) => {
-                    const tooltip = document.createElement('div');
-                    tooltip.className = 'fixed bg-gray-900/95 text-white p-3 rounded-lg shadow-xl text-sm max-w-xs backdrop-blur-sm border border-gray-700/50';
-                    tooltip.innerHTML = `
-                      <div class="font-medium text-base">${info.event.title}</div>
-                      <div class="text-gray-300 mt-2 text-sm leading-relaxed">${info.event.extendedProps.content.substring(0, 100)}...</div>
-                      <div class="mt-2 flex items-center gap-2">
-                        <span class="capitalize px-2 py-1 rounded-full text-xs ${
-                          info.event.extendedProps.status === 'sent' ? 'bg-green-900/50 text-green-300 border border-green-500/30' :
-                          info.event.extendedProps.status === 'failed' ? 'bg-red-900/50 text-red-300 border border-red-500/30' :
-                          info.event.extendedProps.status === 'ready' ? 'bg-indigo-900/50 text-indigo-300 border border-indigo-500/30' :
-                          'bg-gray-800/50 text-gray-300 border border-gray-600/30'
-                        }">${info.event.extendedProps.status}</span>
-                        <span class="text-gray-400 text-xs">${new Date(info.event.start!).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>
+                eventClick={(info) => {
+                  const email = emails.find(e => e.id === info.event.id);
+                  if (email) {
+                    handleEmailSelect(email);
+                  }
+                }}
+                height="auto"
+                headerToolbar={{
+                  left: 'prev,next today',
+                  center: 'title',
+                  right: ''
+                }}
+                eventContent={(eventInfo) => {
+                  return (
+                    <div className="p-1">
+                      <div className="font-medium text-sm truncate">{eventInfo.event.title}</div>
+                      <div className="text-xs opacity-75">
+                        {eventInfo.event.extendedProps.metadata?.topic?.stage || 'Email'}
                       </div>
-                    `;
-
-                    const element = info.el;
-                    element.title = '';
-
-                    element.addEventListener('mouseover', () => {
-                      document.body.appendChild(tooltip);
-                      const rect = element.getBoundingClientRect();
-                      tooltip.style.position = 'fixed';
-                      tooltip.style.top = `${rect.bottom + 8}px`;
-                      tooltip.style.left = `${rect.left}px`;
-                      tooltip.style.zIndex = '10000';
-                    });
-
-                    element.addEventListener('mouseout', () => {
-                      if (document.body.contains(tooltip)) {
-                        document.body.removeChild(tooltip);
-                      }
-                    });
-                  }}
-                />
-              </div>
+                    </div>
+                  );
+                }}
+              />
             </Card>
+
+            {/* Add some CSS for event styling */}
+            <style>{`
+              .event-pending {
+                background-color: #4f46e5 !important;
+                border-color: #4338ca !important;
+              }
+              .event-sent {
+                background-color: #059669 !important;
+                border-color: #047857 !important;
+              }
+              .event-failed {
+                background-color: #dc2626 !important;
+                border-color: #b91c1c !important;
+              }
+              .fc-event {
+                cursor: pointer;
+                padding: 4px;
+              }
+              .fc-event:hover {
+                opacity: 0.9;
+              }
+            `}</style>
 
             {/* Split Screen Layout */}
             <div className="grid grid-cols-2 gap-6">
@@ -1265,8 +1333,14 @@ Include the CTA link in a way that naturally flows with the content.`;
                     </label>
                     <input
                       type="datetime-local"
-                      value={newEmail.scheduled_at}
-                      onChange={(e) => setNewEmail(prev => ({ ...prev, scheduled_at: e.target.value }))}
+                      value={newEmail.scheduled_at ? formatDateForInput(newEmail.scheduled_at) : ''}
+                      onChange={(e) => {
+                        const selectedDate = new Date(e.target.value);
+                        setNewEmail(prev => ({
+                          ...prev,
+                          scheduled_at: selectedDate.toISOString()
+                        }));
+                      }}
                       className="input w-full"
                     />
                   </div>
@@ -1307,11 +1381,13 @@ Include the CTA link in a way that naturally flows with the content.`;
                     <Card 
                       key={email.id} 
                       variant="hover"
-                      onClick={() => handleEmailSelect(email)}
                       className="cursor-pointer transition-transform hover:scale-[1.02] p-4"
                     >
                       <div className="flex justify-between items-start">
-                        <div className="flex-1">
+                        <div 
+                          className="flex-1"
+                          onClick={() => handleEmailSelect(email)}
+                        >
                           <h4 className="font-semibold">{email.subject}</h4>
                           <p className="text-sm text-gray-400 mt-1 line-clamp-2">{email.content}</p>
                           {email.metadata?.sequence_type && (
@@ -1332,12 +1408,26 @@ Include the CTA link in a way that naturally flows with the content.`;
                             </p>
                           )}
                         </div>
-                        <span
-                          className={`ml-4 px-2 py-1 rounded text-sm ${getStatusBadgeClasses(email.status)}`}
-                        >
-                          {email.status === 'ready' ? 'Ready to Send' : 
-                            email.status.charAt(0).toUpperCase() + email.status.slice(1)}
-                        </span>
+                        <div className="flex items-start space-x-2">
+                          <span
+                            className={`px-2 py-1 rounded text-sm ${getStatusBadgeClasses(email.status)}`}
+                          >
+                            {email.status === 'ready' ? 'Ready to Send' : 
+                              email.status.charAt(0).toUpperCase() + email.status.slice(1)}
+                          </span>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteEmail(email.id);
+                            }}
+                            className="p-1 hover:bg-red-900/50 rounded transition-colors"
+                            title="Delete email"
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                              <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+                            </svg>
+                          </button>
+                        </div>
                       </div>
                     </Card>
                   ))}
@@ -1349,6 +1439,34 @@ Include the CTA link in a way that naturally flows with the content.`;
                 </div>
               </div>
             </div>
+
+            {/* Delete Confirmation Modal */}
+            {showDeleteConfirmation && (
+              <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+                <Card className="w-full max-w-md bg-gray-900 border-gray-800">
+                  <div className="p-6">
+                    <h3 className="text-xl font-bold mb-4">Delete All Emails</h3>
+                    <p className="text-gray-400 mb-6">
+                      Are you sure you want to delete all emails in this campaign? This action cannot be undone.
+                    </p>
+                    <div className="flex justify-end space-x-4">
+                      <Button
+                        variant="secondary"
+                        onClick={() => setShowDeleteConfirmation(false)}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        onClick={handleDeleteAllEmails}
+                        className="bg-red-600 hover:bg-red-500"
+                      >
+                        Delete All
+                      </Button>
+                    </div>
+                  </div>
+                </Card>
+              </div>
+            )}
           </>
         )}
 
@@ -1416,15 +1534,6 @@ Include the CTA link in a way that naturally flows with the content.`;
             campaignId={id}
             onClose={() => setShowContactSelection(false)}
             onSave={handleAddContacts}
-          />
-        )}
-
-        {showSequencePlanner && campaign && (
-          <EmailSequencePlanner
-            campaign={campaign}
-            onClose={() => setShowSequencePlanner(false)}
-            isGenerating={isGeneratingSequence}
-            setIsGenerating={setIsGeneratingSequence}
           />
         )}
       </div>
