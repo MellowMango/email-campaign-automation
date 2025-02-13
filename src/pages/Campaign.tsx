@@ -58,6 +58,17 @@ export default function Campaign() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [editingDetails, setEditingDetails] = useState(false);
   const [campaignDetails, setCampaignDetails] = useState<Partial<Campaign>>({});
+  const [startDate] = useState(() => {
+    const date = new Date();
+    date.setFullYear(date.getFullYear() - 1);
+    return date;
+  });
+  
+  const [endDate] = useState(() => {
+    const date = new Date();
+    date.setFullYear(date.getFullYear() + 1);
+    return date;
+  });
 
   // Auto-dismiss success message after 6.5 seconds
   useEffect(() => {
@@ -940,186 +951,346 @@ Include the CTA link in a way that naturally flows with the content.`;
         )}
 
         {activeTab === 'emails' && (
-          <div className="space-y-8 mb-8">
-            <div className="flex justify-between items-center">
-              <h2 className="text-xl font-bold">Email Sequence</h2>
-              <div className="space-x-4">
-                <Button
-                  variant="secondary"
-                  onClick={() => setShowSequencePlanner(true)}
-                >
-                  Plan Sequence
-                </Button>
-                <Button onClick={() => setShowSequencePlanner(false)}>
-                  Create Email
-                </Button>
-              </div>
-            </div>
+          <>
+            {/* Calendar View */}
+            <Card className="p-6 mb-6">
+              <h3 className="text-xl font-semibold mb-6">Email Calendar</h3>
+              <div className="h-[600px] bg-background rounded-lg">
+                <style>
+                  {`
+                    /* Calendar Container */
+                    .fc {
+                      --fc-border-color: rgba(75, 85, 99, 0.15);
+                      --fc-button-bg-color: #4f46e5;
+                      --fc-button-border-color: #4f46e5;
+                      --fc-button-hover-bg-color: #4338ca;
+                      --fc-button-hover-border-color: #4338ca;
+                      --fc-button-active-bg-color: #3730a3;
+                      --fc-button-active-border-color: #3730a3;
+                      --fc-today-bg-color: rgba(79, 70, 229, 0.2);
+                      --fc-page-bg-color: transparent;
+                      background: transparent;
+                    }
 
-            {showSequencePlanner ? (
-              campaign && <EmailSequencePlanner
-                campaign={campaign}
-                onClose={() => setShowSequencePlanner(false)}
-              />
-            ) : (
-              <>
-                {/* Calendar View */}
-                <Card className="p-4">
-                  <h3 className="text-lg font-semibold mb-4">Email Calendar</h3>
-                  <div className="h-[500px] bg-gray-800 rounded-lg p-4">
-                    <FullCalendar
-                      plugins={[dayGridPlugin, interactionPlugin]}
-                      initialView="dayGridMonth"
-                      events={emails.map(email => ({
-                        title: email.subject,
-                        date: email.scheduled_at || email.created_at,
-                        backgroundColor: email.status === 'sent' ? '#059669' : 
-                                          email.status === 'failed' ? '#DC2626' : '#3B82F6',
-                        borderColor: 'transparent',
-                        className: 'px-2 py-1 text-sm'
-                      }))}
-                      height="100%"
-                      headerToolbar={{
-                        left: 'prev,next today',
-                        center: 'title',
-                        right: ''
-                      }}
+                    /* Header Styling */
+                    .fc .fc-toolbar {
+                      padding: 0.75rem 1rem;
+                      margin-bottom: 0.5rem !important;
+                    }
+
+                    .fc .fc-toolbar-title {
+                      font-size: 1.25rem;
+                      font-weight: 600;
+                      color: #e5e7eb;
+                    }
+
+                    /* Button Styling */
+                    .fc .fc-button {
+                      padding: 0.375rem 0.75rem;
+                      font-size: 0.875rem;
+                      border-radius: 0.375rem;
+                      font-weight: 500;
+                      transition: all 0.15s ease;
+                    }
+
+                    .fc .fc-button:focus {
+                      box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.4);
+                    }
+
+                    .fc .fc-button-group {
+                      gap: 0.25rem;
+                    }
+
+                    /* Cell Styling */
+                    .fc .fc-daygrid-day {
+                      min-height: 120px;
+                      transition: background-color 0.15s ease;
+                    }
+
+                    .fc .fc-daygrid-day.fc-day-today {
+                      background-color: var(--fc-today-bg-color);
+                    }
+
+                    .fc .fc-daygrid-day.fc-day-today .fc-daygrid-day-number {
+                      background: rgba(79, 70, 229, 0.3);
+                      color: #fff;
+                      font-weight: 600;
+                      border-radius: 0.375rem;
+                    }
+
+                    .fc .fc-daygrid-day-frame {
+                      padding: 0.375rem;
+                      min-height: 100%;
+                    }
+
+                    /* Event Styling */
+                    .fc-event {
+                      border: none;
+                      border-radius: 0.25rem;
+                      padding: 0.25rem 0.5rem;
+                      margin: 0.125rem 0;
+                      font-size: 0.75rem;
+                      line-height: 1.4;
+                      transition: transform 0.15s ease;
+                      cursor: pointer;
+                      white-space: normal !important;
+                      overflow: hidden;
+                      text-overflow: ellipsis;
+                      display: -webkit-box;
+                      -webkit-line-clamp: 2;
+                      -webkit-box-orient: vertical;
+                    }
+
+                    .fc-daygrid-event-harness {
+                      margin-top: 0.25rem !important;
+                    }
+
+                    .fc-event:hover {
+                      transform: translateY(-1px);
+                    }
+
+                    /* More Events Link */
+                    .fc-daygrid-more-link {
+                      font-size: 0.75rem;
+                      color: #e5e7eb;
+                      background: rgba(79, 70, 229, 0.2);
+                      padding: 0.25rem 0.5rem;
+                      border-radius: 0.25rem;
+                      margin-top: 0.375rem;
+                      font-weight: 500;
+                    }
+
+                    .fc-daygrid-more-link:hover {
+                      background: rgba(79, 70, 229, 0.3);
+                      color: #fff;
+                    }
+
+                    /* Status-based Event Colors */
+                    .event-draft {
+                      background-color: rgba(156, 163, 175, 0.15) !important;
+                      border-left: 2px solid #9ca3af !important;
+                    }
+
+                    .event-ready {
+                      background-color: rgba(79, 70, 229, 0.15) !important;
+                      border-left: 2px solid #4f46e5 !important;
+                    }
+
+                    .event-sent {
+                      background-color: rgba(16, 185, 129, 0.15) !important;
+                      border-left: 2px solid #10b981 !important;
+                    }
+
+                    .event-failed {
+                      background-color: rgba(239, 68, 68, 0.15) !important;
+                      border-left: 2px solid #ef4444 !important;
+                    }
+                  `}
+                </style>
+                <FullCalendar
+                  plugins={[dayGridPlugin, interactionPlugin]}
+                  initialView="dayGridMonth"
+                  events={emails.map(email => ({
+                    id: email.id,
+                    title: email.subject,
+                    start: email.scheduled_at || email.created_at,
+                    end: email.scheduled_at || email.created_at,
+                    extendedProps: {
+                      status: email.status,
+                      content: email.content
+                    },
+                    className: `event-${email.status}`
+                  }))}
+                  height="600px"
+                  headerToolbar={{
+                    left: 'prevYear,prev,next,nextYear',
+                    center: 'title',
+                    right: 'today'
+                  }}
+                  dayMaxEvents={3}
+                  moreLinkContent={(args) => `+${args.num} more`}
+                  fixedWeekCount={false}
+                  showNonCurrentDates={true}
+                  titleFormat={{ year: 'numeric', month: 'long' }}
+                  buttonText={{
+                    today: 'Today',
+                    prevYear: '<<',
+                    nextYear: '>>',
+                    prev: '<',
+                    next: '>'
+                  }}
+                  eventDidMount={(info) => {
+                    const tooltip = document.createElement('div');
+                    tooltip.className = 'fixed bg-gray-900/95 text-white p-3 rounded-lg shadow-xl text-sm max-w-xs backdrop-blur-sm border border-gray-700/50';
+                    tooltip.innerHTML = `
+                      <div class="font-medium text-base">${info.event.title}</div>
+                      <div class="text-gray-300 mt-2 text-sm leading-relaxed">${info.event.extendedProps.content.substring(0, 100)}...</div>
+                      <div class="mt-2 flex items-center gap-2">
+                        <span class="capitalize px-2 py-1 rounded-full text-xs ${
+                          info.event.extendedProps.status === 'sent' ? 'bg-green-900/50 text-green-300 border border-green-500/30' :
+                          info.event.extendedProps.status === 'failed' ? 'bg-red-900/50 text-red-300 border border-red-500/30' :
+                          info.event.extendedProps.status === 'ready' ? 'bg-indigo-900/50 text-indigo-300 border border-indigo-500/30' :
+                          'bg-gray-800/50 text-gray-300 border border-gray-600/30'
+                        }">${info.event.extendedProps.status}</span>
+                        <span class="text-gray-400 text-xs">${new Date(info.event.start!).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>
+                      </div>
+                    `;
+
+                    const element = info.el;
+                    element.title = '';
+
+                    element.addEventListener('mouseover', () => {
+                      document.body.appendChild(tooltip);
+                      const rect = element.getBoundingClientRect();
+                      tooltip.style.position = 'fixed';
+                      tooltip.style.top = `${rect.bottom + 8}px`;
+                      tooltip.style.left = `${rect.left}px`;
+                      tooltip.style.zIndex = '10000';
+                    });
+
+                    element.addEventListener('mouseout', () => {
+                      if (document.body.contains(tooltip)) {
+                        document.body.removeChild(tooltip);
+                      }
+                    });
+                  }}
+                />
+              </div>
+            </Card>
+
+            {/* Split Screen Layout */}
+            <div className="grid grid-cols-2 gap-6">
+              {/* Left Side - Email Creation Form */}
+              <Card className="p-4">
+                <h3 className="text-lg font-semibold mb-4">
+                  {newEmail.id ? 'Edit Email' : 'Create New Email'}
+                </h3>
+                {successMessage && (
+                  <div className="mb-4 p-3 bg-green-900/50 border border-green-500 text-green-300 rounded">
+                    {successMessage}
+                  </div>
+                )}
+                {error && (
+                  <div className="mb-4 p-3 bg-red-900/50 border border-red-500 text-red-300 rounded">
+                    {error}
+                  </div>
+                )}
+                <form onSubmit={handleCreateEmail} className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium mb-2">
+                      Subject
+                    </label>
+                    <input
+                      type="text"
+                      value={newEmail.subject}
+                      onChange={(e) => setNewEmail(prev => ({ ...prev, subject: e.target.value }))}
+                      className="input w-full"
+                      required
                     />
                   </div>
-                </Card>
-
-                {/* Email Creation Form */}
-                <Card className="p-4">
-                  <h3 className="text-lg font-semibold mb-4">
-                    {newEmail.id ? 'Edit Email' : 'Create New Email'}
-                  </h3>
-                  {successMessage && (
-                    <div className="mb-4 p-3 bg-green-900/50 border border-green-500 text-green-300 rounded">
-                      {successMessage}
-                    </div>
-                  )}
-                  {error && (
-                    <div className="mb-4 p-3 bg-red-900/50 border border-red-500 text-red-300 rounded">
-                      {error}
-                    </div>
-                  )}
-                  <form onSubmit={handleCreateEmail} className="space-y-4">
-                    <div>
-                      <label className="block text-sm font-medium mb-2">
-                        Subject
-                      </label>
-                      <input
-                        type="text"
-                        value={newEmail.subject}
-                        onChange={(e) => setNewEmail(prev => ({ ...prev, subject: e.target.value }))}
-                        className="input w-full"
-                        required
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium mb-2">
-                        Content
-                      </label>
-                      <textarea
-                        value={newEmail.content}
-                        onChange={(e) => setNewEmail(prev => ({ ...prev, content: e.target.value }))}
-                        className="input w-full"
-                        rows={5}
-                        required
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium mb-2">
-                        Schedule Send
-                      </label>
-                      <input
-                        type="datetime-local"
-                        value={newEmail.scheduled_at}
-                        onChange={(e) => setNewEmail(prev => ({ ...prev, scheduled_at: e.target.value }))}
-                        className="input w-full"
-                      />
-                    </div>
-                    <div className="flex space-x-4">
+                  <div>
+                    <label className="block text-sm font-medium mb-2">
+                      Content
+                    </label>
+                    <textarea
+                      value={newEmail.content}
+                      onChange={(e) => setNewEmail(prev => ({ ...prev, content: e.target.value }))}
+                      className="input w-full"
+                      rows={10}
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-2">
+                      Schedule Send
+                    </label>
+                    <input
+                      type="datetime-local"
+                      value={newEmail.scheduled_at}
+                      onChange={(e) => setNewEmail(prev => ({ ...prev, scheduled_at: e.target.value }))}
+                      className="input w-full"
+                    />
+                  </div>
+                  <div className="flex space-x-4">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() => handleGenerateContent(newEmail.id ? emails.find(e => e.id === newEmail.id) : undefined)}
+                      disabled={isGeneratingContent}
+                    >
+                      {isGeneratingContent ? 'Generating...' : 'Generate with AI'}
+                    </Button>
+                    <Button type="submit">
+                      {newEmail.id ? 'Update Email' : 'Create Email'}
+                    </Button>
+                    {newEmail.id && (
                       <Button
                         type="button"
                         variant="secondary"
-                        onClick={() => handleGenerateContent(newEmail.id ? emails.find(e => e.id === newEmail.id) : undefined)}
-                        disabled={isGeneratingContent}
+                        onClick={() => setNewEmail({
+                          subject: '',
+                          content: '',
+                          scheduled_at: ''
+                        })}
                       >
-                        {isGeneratingContent ? 'Generating...' : 'Generate with AI'}
+                        Cancel Edit
                       </Button>
-                      <Button type="submit">
-                        {newEmail.id ? 'Update Email' : 'Create Email'}
-                      </Button>
-                      {newEmail.id && (
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          onClick={() => setNewEmail({
-                            subject: '',
-                            content: '',
-                            scheduled_at: ''
-                          })}
-                        >
-                          Cancel Edit
-                        </Button>
-                      )}
-                    </div>
-                  </form>
-                </Card>
-
-                {/* Email List */}
-                <div>
-                  <h3 className="text-lg font-semibold mb-4">Scheduled Emails</h3>
-                  <div className="space-y-4 max-h-[600px] overflow-y-auto">
-                    {emails.map((email) => (
-                      <Card 
-                        key={email.id} 
-                        variant="hover"
-                        onClick={() => handleEmailSelect(email)}
-                        className="cursor-pointer transition-transform hover:scale-[1.02] p-4"
-                      >
-                        <div className="flex justify-between items-start">
-                          <div className="flex-1">
-                            <h4 className="font-semibold">{email.subject}</h4>
-                            <p className="text-sm text-gray-400 mt-1 line-clamp-2">{email.content}</p>
-                            {email.metadata?.sequence_type && (
-                              <div className="flex gap-2 mt-2">
-                                <span className="text-xs px-2 py-1 bg-indigo-400/20 text-indigo-400 rounded">
-                                  {email.metadata.sequence_type.charAt(0).toUpperCase() + email.metadata.sequence_type.slice(1)}
-                                </span>
-                                {email.metadata.topic?.stage && (
-                                  <span className="text-xs px-2 py-1 bg-secondary/20 text-secondary rounded">
-                                    {email.metadata.topic.stage}
-                                  </span>
-                                )}
-                              </div>
-                            )}
-                            {email.scheduled_at && (
-                              <p className="text-sm text-gray-500 mt-2">
-                                Scheduled for: {formatDateForDisplay(email.scheduled_at)}
-                              </p>
-                            )}
-                          </div>
-                          <span
-                            className={`ml-4 px-2 py-1 rounded text-sm ${getStatusBadgeClasses(email.status)}`}
-                          >
-                            {email.status === 'ready' ? 'Ready to Send' : 
-                              email.status.charAt(0).toUpperCase() + email.status.slice(1)}
-                          </span>
-                        </div>
-                      </Card>
-                    ))}
-                    {emails.length === 0 && (
-                      <p className="text-gray-400 text-center py-4">
-                        No emails created yet.
-                      </p>
                     )}
                   </div>
+                </form>
+              </Card>
+
+              {/* Right Side - Email List */}
+              <div className="h-[calc(100vh-16rem)] flex flex-col">
+                <h3 className="text-lg font-semibold mb-4">Scheduled Emails</h3>
+                <div className="flex-1 overflow-y-auto space-y-4 pr-2">
+                  {emails.map((email) => (
+                    <Card 
+                      key={email.id} 
+                      variant="hover"
+                      onClick={() => handleEmailSelect(email)}
+                      className="cursor-pointer transition-transform hover:scale-[1.02] p-4"
+                    >
+                      <div className="flex justify-between items-start">
+                        <div className="flex-1">
+                          <h4 className="font-semibold">{email.subject}</h4>
+                          <p className="text-sm text-gray-400 mt-1 line-clamp-2">{email.content}</p>
+                          {email.metadata?.sequence_type && (
+                            <div className="flex gap-2 mt-2">
+                              <span className="text-xs px-2 py-1 bg-indigo-400/20 text-indigo-400 rounded">
+                                {email.metadata.sequence_type.charAt(0).toUpperCase() + email.metadata.sequence_type.slice(1)}
+                              </span>
+                              {email.metadata.topic?.stage && (
+                                <span className="text-xs px-2 py-1 bg-secondary/20 text-secondary rounded">
+                                  {email.metadata.topic.stage}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                          {email.scheduled_at && (
+                            <p className="text-sm text-gray-500 mt-2">
+                              Scheduled for: {formatDateForDisplay(email.scheduled_at)}
+                            </p>
+                          )}
+                        </div>
+                        <span
+                          className={`ml-4 px-2 py-1 rounded text-sm ${getStatusBadgeClasses(email.status)}`}
+                        >
+                          {email.status === 'ready' ? 'Ready to Send' : 
+                            email.status.charAt(0).toUpperCase() + email.status.slice(1)}
+                        </span>
+                      </div>
+                    </Card>
+                  ))}
+                  {emails.length === 0 && (
+                    <p className="text-gray-400 text-center py-4">
+                      No emails created yet.
+                    </p>
+                  )}
                 </div>
-              </>
-            )}
-          </div>
+              </div>
+            </div>
+          </>
         )}
 
         {activeTab === 'analytics' && (

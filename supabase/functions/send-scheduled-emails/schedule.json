@@ -1,0 +1,5 @@
+{
+  "schedule": "* * * * *",
+  "function_name": "send-scheduled-emails",
+  "enabled": true
+} 
