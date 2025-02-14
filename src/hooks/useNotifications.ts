@@ -1,18 +1,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
-
-export interface Notification {
-  id: string;
-  user_id: string;
-  title: string;
-  message: string;
-  type: 'success' | 'error' | 'info' | 'warning';
-  status: 'unread' | 'read';
-  action_url?: string;
-  created_at: string;
-  updated_at: string;
-}
+import type { Notification } from '../types';
 
 export function useNotifications() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -59,6 +48,10 @@ export function useNotifications() {
                 notif.id === payload.new.id ? payload.new as Notification : notif
               )
             );
+          } else if (payload.eventType === 'DELETE') {
+            setNotifications(prev => 
+              prev.filter(notif => notif.id !== payload.old.id)
+            );
           }
         })
       .subscribe();
@@ -70,13 +63,6 @@ export function useNotifications() {
 
   // Mark notification as read
   const markAsRead = async (id: string) => {
-    // Optimistically update the UI
-    setNotifications(prev => 
-      prev.map(notif => 
-        notif.id === id ? { ...notif, status: 'read' } : notif
-      )
-    );
-
     try {
       const { error } = await supabase
         .from('notifications')
@@ -86,23 +72,14 @@ export function useNotifications() {
         })
         .eq('id', id);
 
-      if (error) {
-        // Revert optimistic update on error
-        setNotifications(prev => 
-          prev.map(notif => 
-            notif.id === id ? { ...notif, status: 'unread' } : notif
-          )
-        );
-        console.error('Error marking notification as read:', error);
-        throw error;
-      }
-    } catch (err) {
-      // Revert optimistic update on error
+      if (error) throw error;
+      
       setNotifications(prev => 
         prev.map(notif => 
-          notif.id === id ? { ...notif, status: 'unread' } : notif
+          notif.id === id ? { ...notif, status: 'read' } : notif
         )
       );
+    } catch (err) {
       console.error('Error marking notification as read:', err);
       throw err;
     }
@@ -141,11 +118,51 @@ export function useNotifications() {
     }
   };
 
+  // Delete a notification
+  const deleteNotification = async (id: string) => {
+    try {
+      const { error } = await supabase
+        .from('notifications')
+        .delete()
+        .eq('id', id);
+
+      if (error) throw error;
+      
+      // Update local state only after successful deletion
+      setNotifications(prev => prev.filter(notif => notif.id !== id));
+    } catch (err) {
+      console.error('Error deleting notification:', err);
+      throw err;
+    }
+  };
+
+  // Delete all notifications
+  const deleteAllNotifications = async () => {
+    if (!user) return;
+    
+    try {
+      const { error } = await supabase
+        .from('notifications')
+        .delete()
+        .eq('user_id', user.id);
+
+      if (error) throw error;
+      
+      // Update local state only after successful deletion
+      setNotifications([]);
+    } catch (err) {
+      console.error('Error deleting all notifications:', err);
+      throw err;
+    }
+  };
+
   return {
     notifications,
     loading,
     error,
     markAsRead,
     createNotification,
+    deleteNotification,
+    deleteAllNotifications,
   };
 } 

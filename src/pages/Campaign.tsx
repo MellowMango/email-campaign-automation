@@ -142,7 +142,12 @@ export default function Campaign() {
 
   // Helper to insert a notification.
   // If the insert fails due to RLS, the error is logged and we continue.
-  const notifyUser = async (title: string, message: string, type: 'info' | 'success' | 'error' = 'info') => {
+  const notifyUser = async (
+    title: string,
+    message: string,
+    type: 'info' | 'success' | 'error' = 'info',
+    options?: { action?: { label: string; url: string } }
+  ) => {
     if (!supabaseAdmin) {
       console.error('Service role client not available');
       return;
@@ -158,7 +163,8 @@ export default function Campaign() {
           type,
           status: 'unread',
           created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
+          updated_at: new Date().toISOString(),
+          metadata: options?.action ? { action: options.action } : undefined
         });
 
       if (notificationError) {
@@ -466,7 +472,7 @@ Include the CTA link naturally within the content.`;
 
     // Immediately notify user that generation has started
     await notifyUser(
-      'Sequence Generation Started',
+      `Generating Sequence for "${campaign.name}"`,
       'Your email sequence is being generated in the background. You can leave this page and check back later.',
       'info'
     );
@@ -568,9 +574,15 @@ Requirements:
 
       // Final success notification
       await notifyUser(
-        'Sequence Generation Complete',
+        `Sequence Generation Complete for "${campaign.name}"`,
         `Successfully generated ${totalEmails} emails for your campaign.`,
-        'success'
+        'success',
+        {
+          action: {
+            label: 'View Generated Sequence',
+            url: `/campaign/${campaign.id}?tab=emails`
+          }
+        }
       );
 
       // Refresh email list

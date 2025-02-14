@@ -65,14 +65,87 @@ The Supabase database includes the following main tables:
 - Real-time CTA link updates
 - Proper validation and error handling
 
-#### Notification System
-- Auto-dismissing success notifications (6.5 seconds)
-- Contextual feedback for user actions
-- Clear visual indicators for:
-  - Campaign updates
-  - Email creation/updates
-  - Contact changes
-  - Error states
+#### Notifications System
+- **Database Structure**
+  - `notifications` table with fields:
+    - `id`: UUID primary key
+    - `user_id`: References auth.users(id)
+    - `title`: Notification title
+    - `message`: Detailed notification message
+    - `type`: Enum ('success', 'error', 'info', 'warning')
+    - `status`: Enum ('read', 'unread')
+    - `metadata`: JSONB for flexible data storage
+      - Supports `action` object with `label` and `url` for clickable notifications
+    - `created_at` and `updated_at`: Timestamps with UTC timezone
+
+- **Security Implementation**
+  - Row Level Security (RLS) policies:
+    - Users can view their own notifications
+    - Users can update their own notifications (e.g., marking as read)
+    - Users can delete their own notifications
+    - Service role has full access for system-generated notifications
+
+- **Real-time Updates**
+  - Supabase real-time subscriptions for instant UI updates
+  - Handles INSERT, UPDATE, and DELETE events
+  - Filters notifications by user_id for data efficiency
+  - Maintains local state synchronization with database
+
+- **Campaign Integration**
+  - Automatic notifications for sequence generation:
+    1. Start notification: "Generating Sequence for [Campaign Name]"
+    2. Progress updates: "Generated X of Y emails (Z% complete)"
+    3. Completion notification: "Sequence Generation Complete for [Campaign Name]"
+       - Includes clickable action to view generated sequence
+       - Direct navigation to campaign's emails tab
+  - Notification types reflect operation status:
+    - 'info' for generation start
+    - 'success' for completion
+    - 'error' for failures
+    - 'warning' for important alerts
+
+- **UI Components**
+  - `NotificationsPopover`: Global notification access
+    - Bell icon with unread count
+    - Popover display on click
+    - Real-time unread count updates
+  - `NotificationsList`: Notification management
+    - Displays notifications in reverse chronological order
+    - Visual styling based on notification type
+    - Individual and bulk actions:
+      - Mark as read/unread
+      - Delete individual notifications
+      - Clear all notifications
+    - Action buttons for notifications with metadata.action
+    - Auto-dismissing success messages (6.5 seconds)
+
+- **Hook Implementation**
+  - `useNotifications` hook provides:
+    - Notification state management
+    - CRUD operations:
+      - `createNotification`: Create new notifications
+      - `markAsRead`: Update notification status
+      - `deleteNotification`: Remove single notification
+      - `deleteAllNotifications`: Clear all user notifications
+    - Real-time subscription management
+    - Loading and error states
+    - Automatic cleanup on unmount
+
+- **Performance Optimizations**
+  - Limit of 50 most recent notifications
+  - Indexed queries for faster retrieval
+  - Memoized unread count calculation
+  - Efficient state updates using React state updater functions
+  - Proper cleanup of real-time subscriptions
+
+- **Error Handling**
+  - Graceful error management for all operations
+  - Clear error messages in console
+  - User-friendly error states in UI
+  - Automatic retry mechanism for failed operations
+  - Proper type safety with TypeScript
+
+This notification system provides real-time feedback for campaign operations, enhancing user experience with immediate updates on sequence generation progress and other important events.
 
 #### User Profile System
 - Automatic profile creation on user signup via database trigger

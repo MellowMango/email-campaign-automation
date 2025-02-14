@@ -17,7 +17,7 @@ export function NotificationsPopover() {
   return (
     <div className="relative">
       <Button
-        variant="secondary"
+        variant="ghost"
         size="sm"
         onClick={() => setIsOpen(!isOpen)}
         className="relative"
@@ -45,14 +45,6 @@ export function NotificationsPopover() {
           />
           <Card className="absolute right-0 mt-2 w-96 z-50 bg-gray-900 border-gray-800">
             <div className="p-4">
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="text-lg font-semibold">Notifications</h3>
-                {unreadCount > 0 && (
-                  <span className="text-sm text-gray-400">
-                    {unreadCount} unread
-                  </span>
-                )}
-              </div>
               <NotificationsList />
             </div>
           </Card>
