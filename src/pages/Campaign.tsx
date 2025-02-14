@@ -10,6 +10,7 @@ import dayGridPlugin from '@fullcalendar/daygrid';
 import interactionPlugin from '@fullcalendar/interaction';
 import { ContactSelectionModal } from '../components/campaign/ContactSelectionModal';
 import { ContactListModal } from '../components/contacts/ContactListModal';
+import { SequenceGenerator } from '../components/campaign/sequence/SequenceGenerator';
 
 // Helper functions for date formatting
 const formatDateForInput = (dateStr: string) => {
@@ -33,6 +34,31 @@ const formatDateForDisplay = (dateStr: string) => {
   });
 };
 
+// Types
+type EmailTone = 'formal' | 'casual' | 'professional' | 'friendly';
+type CampaignType = 'manual' | 'ai-adaptive';
+type TabType = 'overview' | 'contacts' | 'emails' | 'analytics' | 'details';
+
+interface CampaignFeatures {
+  adaptive_sequences: boolean;
+  auto_responder: boolean;
+  lead_scoring: boolean;
+}
+
+interface EmailFormState {
+  id?: string;
+  subject: string;
+  content: string;
+  scheduled_at: string;
+}
+
+interface NotificationOptions {
+  action?: {
+    label: string;
+    url: string;
+  };
+}
+
 export default function Campaign() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -48,48 +74,18 @@ export default function Campaign() {
   const [campaign, setCampaign] = useState<Campaign | null>(null);
   const [emails, setEmails] = useState<Email[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
-  const [activeTab, setActiveTab] = useState<'overview' | 'contacts' | 'emails' | 'analytics' | 'details'>('overview');
+  const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  // Check local storage for ongoing generation on mount
-  useEffect(() => {
-    const storedGenerationStatus = localStorage.getItem(`sequence_generation_${id}`);
-    if (storedGenerationStatus) {
-      setIsGeneratingSequence(true);
-      // Poll for completion
-      const checkCompletion = async () => {
-        const { count } = await supabase
-          .from('emails')
-          .select('*', { count: 'exact', head: true })
-          .eq('campaign_id', id);
-        
-        if (count && count > 0) {
-          setIsGeneratingSequence(false);
-          localStorage.removeItem(`sequence_generation_${id}`);
-        }
-      };
-      
-      const interval = setInterval(checkCompletion, 5000); // Check every 5 seconds
-      return () => clearInterval(interval);
-    }
-  }, [id]);
-
   // Email form state
-  const [newEmail, setNewEmail] = useState<{
-    id?: string;
-    subject: string;
-    content: string;
-    scheduled_at: string;
-  }>({
+  const [newEmail, setNewEmail] = useState<EmailFormState>({
     subject: '',
     content: '',
     scheduled_at: ''
   });
   const [isGeneratingContent, setIsGeneratingContent] = useState(false);
-  const [isGeneratingSequence, setIsGeneratingSequence] = useState(false);
-  const [showSequencePlanner, setShowSequencePlanner] = useState(false);
   const [showContactSelection, setShowContactSelection] = useState(false);
   const [showListModal, setShowListModal] = useState(false);
   const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
@@ -98,14 +94,14 @@ export default function Campaign() {
   const [editingDetails, setEditingDetails] = useState(false);
   const [campaignDetails, setCampaignDetails] = useState<Partial<Campaign>>({});
 
-  // Contacts tab state (sorting, filtering, selection)
+  // Contacts tab state
   const [selectedContacts, setSelectedContacts] = useState<Contact[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<Contact['status'] | 'all'>('all');
   const [sortField, setSortField] = useState<keyof Contact>('created_at');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
 
-  // Calendar boundaries for the emails calendar view
+  // Calendar boundaries
   const [startDate] = useState(() => {
     const date = new Date();
     date.setFullYear(date.getFullYear() - 1);
@@ -125,28 +121,18 @@ export default function Campaign() {
     }
   }, [successMessage]);
 
-  type EmailTone = 'formal' | 'casual' | 'professional' | 'friendly';
-  type CampaignType = 'manual' | 'ai-adaptive';
-  
-  interface CampaignFeatures {
-    adaptive_sequences: boolean;
-    auto_responder: boolean;
-    lead_scoring: boolean;
-  }
-
   const defaultFeatures: CampaignFeatures = {
     adaptive_sequences: false,
     auto_responder: false,
     lead_scoring: false
   };
 
-  // Helper to insert a notification.
-  // If the insert fails due to RLS, the error is logged and we continue.
+  // Helper to insert a notification
   const notifyUser = async (
     title: string,
     message: string,
     type: 'info' | 'success' | 'error' = 'info',
-    options?: { action?: { label: string; url: string } }
+    options?: NotificationOptions
   ) => {
     if (!supabaseAdmin) {
       console.error('Service role client not available');
@@ -175,6 +161,7 @@ export default function Campaign() {
     }
   };
 
+  // Data fetching and subscriptions
   useEffect(() => {
     const fetchCampaignData = async () => {
       try {
@@ -214,7 +201,7 @@ export default function Campaign() {
 
     fetchCampaignData();
 
-    // Subscribe to real-time updates for emails and contacts
+    // Subscribe to real-time updates
     const subscriptions = [
       supabase.channel('emails')
         .on('postgres_changes', 
@@ -275,7 +262,7 @@ export default function Campaign() {
 
   const filteredContacts = contacts.filter(filterContacts).sort(sortContacts);
 
-  // Email creation/update functions
+  // Email management functions
   const handleCreateEmail = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -287,7 +274,7 @@ export default function Campaign() {
         subject: newEmail.subject,
         content: newEmail.content,
         scheduled_at: scheduledAt,
-        status: (scheduledAt ? 'pending' : 'draft') as 'pending' | 'draft' | 'sent' | 'ready' | 'failed'
+        status: (scheduledAt ? 'pending' : 'draft') as Email['status']
       };
       if (newEmail.id) {
         const { error } = await supabase.from('emails').update(emailData).eq('id', newEmail.id);
@@ -460,159 +447,6 @@ Include the CTA link naturally within the content.`;
     }
   };
 
-  // Generate email sequence with notifications
-  const handleGenerateSequence = async () => {
-    if (!campaign) {
-      setError('Campaign not found');
-      return;
-    }
-
-    // Store generation status in local storage
-    localStorage.setItem(`sequence_generation_${id}`, 'true');
-
-    // Immediately notify user that generation has started
-    await notifyUser(
-      `Generating Sequence for "${campaign.name}"`,
-      'Your email sequence is being generated in the background. You can leave this page and check back later.',
-      'info'
-    );
-    setIsGeneratingSequence(true);
-
-    // Start background processing
-    const sequenceStartDate = new Date(newEmail.scheduled_at);
-    const totalEmails = Math.floor((campaign.duration / 7) * campaign.emails_per_week);
-    const daysInterval = Math.floor(campaign.duration / totalEmails);
-    const stages = {
-      awareness: ['Problem Awareness', 'Solution Education', 'Brand Introduction', 'Value Proposition', 'Social Proof'],
-      conversion: ['Value Proposition', 'Feature Showcase', 'Case Studies', 'Offer Introduction', 'Call to Action'],
-      nurture: ['Industry Insights', 'Best Practices', 'Tips & Tricks', 'Success Stories', 'Thought Leadership']
-    }[campaign.sequence_type];
-
-    // Process emails in smaller batches to avoid timeouts and show progress
-    const batchSize = 5;
-    const totalBatches = Math.ceil(totalEmails / batchSize);
-
-    try {
-      for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
-        const batchStart = batchIndex * batchSize;
-        const batchEnd = Math.min(batchStart + batchSize, totalEmails);
-        const emailsToCreate = [];
-
-        // Process current batch
-        for (let i = batchStart; i < batchEnd; i++) {
-          const emailDate = new Date(sequenceStartDate);
-          emailDate.setDate(emailDate.getDate() + i * daysInterval);
-          const stageIndex = Math.floor((i / totalEmails) * stages.length);
-          const stage = stages[stageIndex];
-          const prompt = `Generate content for email ${i + 1} of ${totalEmails} in the ${campaign.sequence_type} sequence:
-Campaign Name: ${campaign.name}
-Description: ${campaign.description || 'N/A'}
-Target Audience: ${campaign.target_audience || 'N/A'}
-Goals: ${campaign.goals || 'N/A'}
-Value Proposition: ${campaign.value_proposition || 'N/A'}
-Current Stage: ${stage}
-CTA Link: ${campaign.cta_links[campaign.sequence_type]}
-
-Requirements:
-1. Create a subject line and content that aligns with the current stage (${stage})
-2. Focus on the target audience's needs
-3. Build progressively towards the campaign goals
-4. Maintain a ${campaign.email_tone || 'professional'} tone
-5. Include the CTA naturally`;
-
-          const { subject, content } = await generateEmailContent(
-            prompt,
-            campaign.target_audience || 'N/A',
-            campaign.email_tone || 'professional',
-            campaign.company_name
-          );
-
-          emailsToCreate.push({
-            campaign_id: campaign.id,
-            subject,
-            content,
-            scheduled_at: emailDate.toISOString(),
-            status: 'draft',
-            metadata: {
-              sequence_type: campaign.sequence_type,
-              topic: {
-                name: subject,
-                description: content.substring(0, 100) + '...',
-                stage
-              }
-            }
-          });
-        }
-
-        // Insert batch of emails
-        const { error: insertError } = await supabase
-          .from('emails')
-          .insert(emailsToCreate);
-
-        if (insertError) throw insertError;
-
-        // Log AI generation
-        const { error: logError } = await supabase
-          .from('ai_logs')
-          .insert(emailsToCreate.map(email => ({
-            campaign_id: campaign.id,
-            prompt: email.metadata?.topic?.description || '',
-            response: `Subject: ${email.subject}\nContent: ${email.content}`,
-            model: 'gpt-4-turbo-preview'
-          })));
-
-        if (logError) console.error('Failed to log AI generation:', logError);
-
-        // Notify progress after each batch
-        const progress = Math.round(((batchIndex + 1) / totalBatches) * 100);
-        await notifyUser(
-          'Sequence Generation Progress',
-          `Generated ${batchEnd} of ${totalEmails} emails (${progress}% complete)`,
-          'info'
-        );
-      }
-
-      // Final success notification
-      await notifyUser(
-        `Sequence Generation Complete for "${campaign.name}"`,
-        `Successfully generated ${totalEmails} emails for your campaign.`,
-        'success',
-        {
-          action: {
-            label: 'View Generated Sequence',
-            url: `/campaign/${campaign.id}?tab=emails`
-          }
-        }
-      );
-
-      // Refresh email list
-      const { data: updatedEmails, error: fetchError } = await supabase
-        .from('emails')
-        .select('*')
-        .eq('campaign_id', campaign.id)
-        .order('scheduled_at', { ascending: true });
-
-      if (fetchError) throw fetchError;
-      setEmails(updatedEmails || []);
-      setSuccessMessage('Email sequence generated successfully');
-
-    } catch (err) {
-      console.error('Sequence generation error:', err);
-      await notifyUser(
-        'Sequence Generation Error',
-        'There was an error generating your email sequence. Please try again.',
-        'error'
-      );
-      setError(err instanceof Error ? err.message : 'Failed to generate sequence');
-      // Clear generation status on error
-      localStorage.removeItem(`sequence_generation_${id}`);
-    } finally {
-      setIsGeneratingSequence(false);
-      // Clear generation status on completion
-      localStorage.removeItem(`sequence_generation_${id}`);
-    }
-  };
-
   const handleDeleteEmail = async (emailId: string) => {
     try {
       const { error } = await supabase.from('emails').delete().eq('id', emailId);
@@ -636,7 +470,7 @@ Requirements:
     }
   };
 
-  // Contacts tab selection helpers
+  // Contact selection helpers
   const handleContactSelect = (contact: Contact) => {
     setSelectedContacts(prev => {
       const isSelected = prev.some(c => c.id === contact.id);
@@ -692,16 +526,17 @@ Requirements:
 
         {/* Navigation Tabs */}
         <div className="flex space-x-4 mb-8 border-b border-gray-700">
-          <button className={`px-4 py-2 ${activeTab === 'overview' ? 'text-indigo-400 border-b-2 border-indigo-400' : 'text-gray-400'}`}
-            onClick={() => setActiveTab('overview')}>Overview</button>
-          <button className={`px-4 py-2 ${activeTab === 'details' ? 'text-indigo-400 border-b-2 border-indigo-400' : 'text-gray-400'}`}
-            onClick={() => setActiveTab('details')}>Details</button>
-          <button className={`px-4 py-2 ${activeTab === 'contacts' ? 'text-indigo-400 border-b-2 border-indigo-400' : 'text-gray-400'}`}
-            onClick={() => setActiveTab('contacts')}>Contacts ({contacts.length})</button>
-          <button className={`px-4 py-2 ${activeTab === 'emails' ? 'text-indigo-400 border-b-2 border-indigo-400' : 'text-gray-400'}`}
-            onClick={() => setActiveTab('emails')}>Emails ({emails.length})</button>
-          <button className={`px-4 py-2 ${activeTab === 'analytics' ? 'text-indigo-400 border-b-2 border-indigo-400' : 'text-gray-400'}`}
-            onClick={() => setActiveTab('analytics')}>Analytics</button>
+          {(['overview', 'details', 'contacts', 'emails', 'analytics'] as const).map((tab) => (
+            <button
+              key={tab}
+              className={`px-4 py-2 ${activeTab === tab ? 'text-indigo-400 border-b-2 border-indigo-400' : 'text-gray-400'}`}
+              onClick={() => setActiveTab(tab)}
+            >
+              {tab.charAt(0).toUpperCase() + tab.slice(1)}
+              {tab === 'contacts' && ` (${contacts.length})`}
+              {tab === 'emails' && ` (${emails.length})`}
+            </button>
+          ))}
         </div>
 
         {/* Tab Content */}
@@ -979,39 +814,11 @@ Requirements:
 
         {activeTab === 'emails' && (
           <>
-            <div className="mb-6 p-4 bg-gray-800 rounded-lg flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-              <div>
-                <h2 className="text-2xl font-bold mb-2">Email Sequence Controls</h2>
-                <p className="text-sm text-gray-400">Select a start date then generate the sequence.</p>
-              </div>
-              <div className="flex flex-col md:flex-row items-center gap-4">
-                <div>
-                  <label className="block text-sm font-medium mb-1">Start Date</label>
-                  <input type="datetime-local" className="input bg-gray-800 border-gray-700 text-white"
-                    min={new Date().toISOString().split('.')[0]}
-                    onChange={(e) => {
-                      const selectedDate = new Date(e.target.value);
-                      setNewEmail(prev => ({ ...prev, scheduled_at: selectedDate.toISOString() }));
-                    }} />
-                </div>
-                <Button onClick={handleGenerateSequence} disabled={!campaign.sequence_type || isGeneratingSequence || !newEmail.scheduled_at}>
-                  {isGeneratingSequence ? (
-                    <span className="flex items-center">
-                      <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                      </svg>
-                      Generating...
-                    </span>
-                  ) : 'Generate Sequence'}
-                </Button>
-              </div>
+            {/* New Sequence Generator */}
+            <div className="mb-6">
+              <SequenceGenerator campaign={campaign} />
             </div>
-            {isGeneratingSequence && (
-              <div className="mb-4 p-4 bg-blue-900 text-blue-300 rounded">
-                Sequence generation is in progress. This may take a couple minutes.
-              </div>
-            )}
+
             {emails.length > 0 && (
               <div className="mb-6 flex justify-end">
                 <Button variant="secondary" onClick={() => setShowDeleteConfirmation(true)}
@@ -1020,6 +827,7 @@ Requirements:
                 </Button>
               </div>
             )}
+
             <Card className="p-6 mb-6">
               <FullCalendar
                 plugins={[dayGridPlugin, interactionPlugin]}
@@ -1046,6 +854,7 @@ Requirements:
                 )}
               />
             </Card>
+
             <div className="grid grid-cols-2 gap-6">
               <Card className="p-4">
                 <h3 className="text-lg font-semibold mb-4">{newEmail.id ? 'Edit Email' : 'Create New Email'}</h3>
@@ -1097,6 +906,7 @@ Requirements:
                   </div>
                 </form>
               </Card>
+
               <div className="h-[calc(100vh-16rem)] flex flex-col">
                 <h3 className="text-lg font-semibold mb-4">Scheduled Emails</h3>
                 <div className="flex-1 overflow-y-auto space-y-4 pr-2">
