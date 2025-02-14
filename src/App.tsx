@@ -1,8 +1,9 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import { useAuth } from './contexts/AuthContext';
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Header } from './components/common/Header';
+import { initializeAPI } from './lib/api/init';
 
 // Lazy load pages for better performance
 const Landing = React.lazy(() => import('./pages/Landing'));
@@ -32,7 +33,12 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-function App() {
+export function App() {
+  useEffect(() => {
+    // Initialize API client
+    initializeAPI();
+  }, []);
+
   return (
     <Router>
       <AuthProvider>
