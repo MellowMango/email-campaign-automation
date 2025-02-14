@@ -341,3 +341,73 @@ export default client;
    - Ensure your types match your Supabase schema
    - Check that the Database type is properly exported
    - Verify the import paths are correct
+
+## Email Sequence Generation
+
+The email sequence generation feature is a powerful tool that automatically creates a series of targeted emails based on your campaign settings. Here's how it works:
+
+### Prerequisites
+1. Campaign must have a sequence type ('awareness', 'conversion', or 'nurture')
+2. A start date must be selected
+3. Campaign duration and emails per week must be set
+
+### Sequence Types and Stages
+Each sequence type follows a specific progression of stages:
+
+- **Awareness & Education**
+  1. Problem Awareness
+  2. Solution Education
+  3. Brand Introduction
+  4. Value Proposition
+  5. Social Proof
+
+- **Direct Conversion**
+  1. Value Proposition
+  2. Feature Showcase
+  3. Case Studies
+  4. Offer Introduction
+  5. Call to Action
+
+- **Relationship Nurturing**
+  1. Industry Insights
+  2. Best Practices
+  3. Tips & Tricks
+  4. Success Stories
+  5. Thought Leadership
+
+### Generation Process
+1. Calculates total number of emails based on campaign duration and emails per week
+2. Distributes emails evenly across the campaign duration
+3. For each email:
+   - Determines the appropriate stage based on position in sequence
+   - Generates content using GPT-4 with campaign context and stage requirements
+   - Creates email with metadata including sequence type, topic, and stage
+   - Initially sets status to 'draft'
+
+### Email Structure
+Generated emails include:
+- Subject line aligned with the current stage
+- Content tailored to campaign goals and target audience
+- Stage-appropriate CTA placement
+- Metadata for tracking sequence progression
+
+### Database Schema
+Emails are stored with:
+- Basic fields: subject, content, scheduled_at, status
+- Metadata including:
+  - sequence_type: The campaign's sequence type
+  - topic: Name, description, and current stage
+  - Additional placeholders for personalization
+
+### Status Management
+- New emails start as 'draft'
+- Can be updated to 'pending' when ready to send
+- Must have a recipient (to_email) to be marked as 'pending'
+- System tracks 'sent' and 'failed' statuses
+
+### Calendar Integration
+- Emails are displayed on an interactive calendar
+- Color-coded by status (pending, sent, failed)
+- Allows easy visualization of sequence progression
+
+This feature streamlines the creation of cohesive email sequences while maintaining flexibility for customization.

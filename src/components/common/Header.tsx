@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
+import { NotificationsPopover } from './NotificationsPopover';
 
 export function Header() {
   const { user, signOut } = useAuth();
@@ -28,6 +29,7 @@ export function Header() {
               <Link to="/settings" className="text-gray-300 hover:text-white transition-colors duration-200">
                 Settings
               </Link>
+              <NotificationsPopover />
               <button
                 onClick={signOut}
                 className="text-gray-300 hover:text-white transition-colors duration-200"
@@ -45,22 +47,25 @@ export function Header() {
           )}
         </nav>
         {/* Mobile Navigation Toggle */}
-        <button
-          onClick={toggleMenu}
-          className="md:hidden text-gray-300 hover:text-white transition-colors duration-200 focus:outline-none"
-        >
-          {menuOpen ? (
-            // Close Icon
-            <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          ) : (
-            // Hamburger Icon
-            <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16" />
-            </svg>
-          )}
-        </button>
+        <div className="md:hidden flex items-center space-x-4">
+          {user && <NotificationsPopover />}
+          <button
+            onClick={toggleMenu}
+            className="text-gray-300 hover:text-white transition-colors duration-200 focus:outline-none"
+          >
+            {menuOpen ? (
+              // Close Icon
+              <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            ) : (
+              // Hamburger Icon
+              <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            )}
+          </button>
+        </div>
       </div>
       {/* Mobile Navigation Menu */}
       {menuOpen && (
