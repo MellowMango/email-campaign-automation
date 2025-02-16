@@ -45,6 +45,69 @@ The Supabase database includes the following main tables:
   - `created_at`: Timestamp
   - `updated_at`: Timestamp
   - Protected by RLS policies
+
+- `domain_settings`: Email domain configuration
+  - `id`: UUID primary key
+  - `user_id`: References auth.users(id)
+  - `domain`: Domain name
+  - `status`: Enum ('pending', 'verified', 'failed', 'sender_pending')
+  - `dns_records`: JSONB array of required DNS records
+  - `sendgrid_domain_id`: SendGrid domain identifier
+  - `sender_email`: Verified sender email address
+  - `sender_verified`: Boolean
+  - `created_at`: Timestamp
+  - `updated_at`: Timestamp
+  - Protected by RLS policies
+
+- `email_events`: Email tracking and analytics
+  - `id`: UUID primary key
+  - `email_id`: References emails(id)
+  - `campaign_id`: References campaigns(id)
+  - `user_id`: References auth.users(id)
+  - `event_type`: Enum ('processed', 'dropped', 'delivered', 'deferred', 'bounce', 'blocked', 'spam_report', 'unsubscribe', 'open', 'click')
+  - `event_data`: JSONB for event details
+  - `occurred_at`: Timestamp
+  - `created_at`: Timestamp
+  - Indexed for performance
+  - Protected by RLS policies
+
+- `rate_limits`: Email sending rate management
+  - `id`: UUID primary key
+  - `user_id`: References auth.users(id)
+  - `window_count`: Current minute's request count
+  - `daily_count`: Current day's email count
+  - `last_window`: Timestamp of last rate limit window
+  - `created_at`: Timestamp
+  - `updated_at`: Timestamp
+  - Protected by RLS policies
+
+- `rate_limit_logs`: Rate limit monitoring
+  - `id`: UUID primary key
+  - `user_id`: References auth.users(id)
+  - `event_type`: Enum ('success', 'exceeded')
+  - `request_count`: Number of requests in window
+  - `window_key`: Timestamp of rate limit window
+  - `metadata`: JSONB for additional data
+  - `created_at`: Timestamp
+  - Protected by RLS policies
+
+- `email_errors`: Error tracking and retry management
+  - `id`: UUID primary key
+  - `email_id`: References emails(id)
+  - `campaign_id`: References campaigns(id)
+  - `user_id`: References auth.users(id)
+  - `error_type`: Error classification
+  - `error_message`: Detailed error message
+  - `error_stack`: Error stack trace
+  - `context`: JSONB for error context
+  - `retry_count`: Number of retry attempts
+  - `last_retry_at`: Timestamp of last retry
+  - `next_retry_at`: Timestamp for next retry
+  - `status`: Enum ('pending', 'retrying', 'resolved', 'failed')
+  - `created_at`: Timestamp
+  - `updated_at`: Timestamp
+  - Protected by RLS policies
+
 - `campaigns`: Marketing campaign details
 - `contacts`: Contact information and engagement metrics
 - `contact_lists`: Grouped contacts for targeted campaigns
@@ -174,6 +237,107 @@ This notification system provides real-time feedback for campaign operations, en
 - List management interface
 - Contact engagement tracking
 - Automatic scoring system
+
+#### SendGrid Email Integration
+- **Email Service Architecture**
+  - Modular provider-based design
+  - Support for multiple email providers (SendGrid, Mock for testing)
+  - Singleton pattern for service management
+  - Comprehensive interface definitions for email operations
+
+- **SendGrid Provider Implementation**
+  - Full SendGrid API integration with TypeScript types
+  - Features:
+    - Email sending with HTML content
+    - Domain verification and management
+    - Sender verification system
+    - Rate limiting and quota management
+    - Comprehensive error handling
+  - Security:
+    - API key management
+    - Domain verification records
+    - Sender verification process
+    - Rate limit enforcement
+
+- **Email Service Features**
+  - Daily sending limits (100 emails/day for free tier)
+  - Rate limiting (1 second between emails)
+  - Automatic retry mechanism
+  - Error logging and monitoring
+  - Domain verification status tracking
+  - Sender verification workflow
+  - Cache management for API responses
+
+#### Testing Suite Implementation
+- **Comprehensive Test Coverage**
+  - Unit tests for all core functionality
+  - Integration tests for email operations
+  - Mock provider for testing without API calls
+  - Proper error case coverage
+  - Rate limit testing
+  - Retry mechanism verification
+
+- **Test Infrastructure**
+  - Vitest test runner configuration
+  - Mock implementations for external services
+  - Type-safe test utilities
+  - Proper test isolation
+  - Automatic test environment setup/teardown
+
+- **Mock System**
+  - Mock email provider for testing
+  - Simulated rate limits and quotas
+  - Configurable delay simulation
+  - Error scenario simulation
+  - Type-safe mock implementations
+
+- **Test Categories**
+  - Service initialization tests
+  - Provider switching tests
+  - Email sending operation tests
+  - Domain verification tests
+  - Sender verification tests
+  - Rate limiting tests
+  - Error handling tests
+  - Mock provider tests
+
+- **CI/CD Integration**
+  - Automated test runs
+  - Coverage reporting
+  - Test environment variables
+  - Proper secret management
+  - Test failure reporting
+
+### Testing Workflow
+1. **Local Development Testing**
+   - Run tests: `npm test`
+   - Watch mode: `npm test -- --watch`
+   - Coverage report: `npm run test:coverage`
+   - UI test runner: `npm run test:ui`
+
+2. **Test Environment Setup**
+   ```bash
+   # Create test environment file
+   cp .env.example .env.test
+
+   # Configure test variables
+   SUPABASE_URL=http://localhost:54321
+   SUPABASE_SERVICE_ROLE_KEY=test-service-role-key
+   SENDGRID_API_KEY=test-sendgrid-key
+   SENDGRID_WEBHOOK_KEY=test-webhook-key
+   ```
+
+3. **Running Specific Tests**
+   ```bash
+   # Run email service tests
+   npm test src/lib/email/__tests__/email.service.test.ts
+
+   # Run all tests in a directory
+   npm test src/lib/email/__tests__/
+
+   # Run tests matching a pattern
+   npm test -- -t "should send email"
+   ```
 
 ## Technical Architecture
 
