@@ -3,9 +3,23 @@ import { APIRequestConfig, APIResponse, RequestInterceptor, ResponseInterceptor,
 import { apiCache } from './cache';
 import { rateLimiter } from './rateLimit';
 import { circuitBreaker } from './circuitBreaker';
-import { supabase } from '../supabase/client'; // Import Supabase client
+import { supabase } from '@/lib/supabase';
 
 const MAX_PAYLOAD_SIZE = 5 * 1024 * 1024; // 5MB
+
+export interface RequestOptions extends RequestInit {
+  shouldCache?: boolean;
+  cacheTTL?: number;
+  retries?: number;
+}
+
+export interface APIResponse<T = unknown> {
+  data?: T;
+  error?: string;
+}
+
+type RequestInterceptor = (config: RequestOptions) => Promise<RequestOptions>;
+type ResponseInterceptor = (response: APIResponse<unknown>) => Promise<APIResponse<unknown>>;
 
 /**
  * Singleton class for handling API requests with built-in caching, rate limiting, and circuit breaking.
@@ -16,9 +30,17 @@ export class APIClient {
   private requestInterceptors: RequestInterceptor[] = [];
   private responseInterceptors: ResponseInterceptor[] = [];
   private baseURL: string;
+  private cache: Map<string, { data: APIResponse<unknown>; timestamp: number }>;
+  private failureCount: Map<string, number>;
+  private circuitOpen: Set<string>;
+  private readonly MAX_REQUESTS_PER_MINUTE = 10;
+  private requestTimes: number[] = [];
 
   private constructor() {
     this.baseURL = import.meta.env.VITE_SUPABASE_URL || '';
+    this.cache = new Map();
+    this.failureCount = new Map();
+    this.circuitOpen = new Set();
     this.setupAuthInterceptor();
   }
 
@@ -26,19 +48,13 @@ export class APIClient {
    * Sets up the authentication interceptor to include the Supabase JWT token
    */
   private setupAuthInterceptor(): void {
-    this.addRequestInterceptor(async (config) => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.access_token) {
-        return {
-          ...config,
-          headers: {
-            ...config.headers,
-            'Authorization': `Bearer ${session.access_token}`,
-          },
-        };
-      }
-      return config;
-    });
+    this.addRequestInterceptor(async (config) => ({
+      ...config,
+      headers: {
+        ...config.headers,
+        'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token || ''}`,
+      },
+    }));
   }
 
   /**
@@ -68,7 +84,7 @@ export class APIClient {
     this.responseInterceptors.push(interceptor);
   }
 
-  private async applyRequestInterceptors(config: APIRequestConfig): Promise<APIRequestConfig> {
+  private async applyRequestInterceptors(config: RequestOptions): Promise<RequestOptions> {
     let modifiedConfig = { ...config };
     for (const interceptor of this.requestInterceptors) {
       modifiedConfig = await interceptor(modifiedConfig);
@@ -76,10 +92,10 @@ export class APIClient {
     return modifiedConfig;
   }
 
-  private async applyResponseInterceptors(response: APIResponse): Promise<APIResponse> {
+  private async applyResponseInterceptors<T>(response: APIResponse<T>): Promise<APIResponse<T>> {
     let modifiedResponse = { ...response };
     for (const interceptor of this.responseInterceptors) {
-      modifiedResponse = await interceptor(modifiedResponse);
+      modifiedResponse = await interceptor(modifiedResponse) as APIResponse<T>;
     }
     return modifiedResponse;
   }
@@ -167,10 +183,138 @@ export class APIClient {
     return method === 'GET';
   }
 
-  private getCacheKey(config: APIRequestConfig): string {
-    return `${config.method || 'GET'}:${config.endpoint}${
-      config.body ? ':' + JSON.stringify(config.body) : ''
-    }`;
+  private generateCacheKey(url: string, init: RequestOptions): string {
+    return `${url}-${JSON.stringify(init.body || '')}-${JSON.stringify(init.headers || {})}`;
+  }
+
+  private getCsrfToken(): string | null {
+    const match = document.cookie.match(/csrf_token=([^;]+)/);
+    return match ? match[1] : null;
+  }
+
+  private async request<T>(path: string, init: RequestOptions = {}): Promise<APIResponse<T>> {
+    const url = `${this.baseURL}${path}`;
+    
+    // Check circuit breaker
+    if (this.circuitOpen.has(url)) {
+      throw new Error('Circuit breaker is open');
+    }
+
+    // Check rate limits
+    const now = Date.now();
+    this.requestTimes = this.requestTimes.filter(time => now - time < 60000);
+    if (this.requestTimes.length >= this.MAX_REQUESTS_PER_MINUTE) {
+      throw new Error('Rate limit exceeded');
+    }
+    this.requestTimes.push(now);
+
+    // Check cache
+    if (init.shouldCache && (!init.method || init.method === 'GET')) {
+      const cacheKey = this.generateCacheKey(url, init);
+      const cached = this.cache.get(cacheKey);
+      if (cached) {
+        const ttl = init.cacheTTL ?? 300000; // Default 5 minutes
+        if (now - cached.timestamp < ttl) {
+          return cached.data as APIResponse<T>;
+        }
+        this.cache.delete(cacheKey);
+      }
+    }
+
+    // Prepare headers
+    const headers = new Headers({
+      'Content-Type': 'application/json',
+      ...(init.headers || {})
+    });
+
+    // Add CSRF token if available
+    const csrfToken = this.getCsrfToken();
+    if (csrfToken) {
+      headers.set('X-CSRF-Token', csrfToken);
+    }
+
+    try {
+      const config = await this.applyRequestInterceptors({
+        ...init,
+        headers
+      });
+
+      const response = await fetch(url, config);
+      const data = await response.json();
+
+      if (!response.ok) {
+        // Update failure count
+        const failures = (this.failureCount.get(url) || 0) + 1;
+        this.failureCount.set(url, failures);
+
+        // Open circuit if too many failures
+        if (failures >= 5) {
+          this.circuitOpen.add(url);
+          setTimeout(() => {
+            this.circuitOpen.delete(url);
+            this.failureCount.delete(url);
+          }, 30000); // Reset after 30 seconds
+          throw new Error('Circuit breaker is open');
+        }
+
+        const error = new Error(response.statusText || 'Request failed');
+        (error as any).status = response.status;
+        throw error;
+      }
+
+      // Reset failure count on success
+      this.failureCount.delete(url);
+
+      const result: APIResponse<T> = {
+        data: data.data || data
+      };
+
+      // Update cache
+      if (init.shouldCache && (!init.method || init.method === 'GET')) {
+        const cacheKey = this.generateCacheKey(url, init);
+        this.cache.set(cacheKey, {
+          data: result,
+          timestamp: now
+        });
+      }
+
+      return await this.applyResponseInterceptors(result) as APIResponse<T>;
+    } catch (error) {
+      if (error instanceof Error) {
+        if (error.message === 'Circuit breaker is open' || error.message === 'Rate limit exceeded') {
+          throw error;
+        }
+        if ((error as any).status === 429) {
+          throw new Error('Rate limit exceeded');
+        }
+        return { error: error.message };
+      }
+      return { error: 'Network error occurred' };
+    }
+  }
+
+  async get<T>(path: string, options: Omit<RequestOptions, 'method' | 'body'> = {}): Promise<APIResponse<T>> {
+    return this.request<T>(path, { ...options, method: 'GET' });
+  }
+
+  async post<T>(path: string, data: any, options: Omit<RequestOptions, 'method' | 'body'> = {}): Promise<APIResponse<T>> {
+    return this.request<T>(path, {
+      ...options,
+      method: 'POST',
+      body: JSON.stringify(data)
+    });
+  }
+
+  async put<T>(path: string, data: any, options: Omit<RequestOptions, 'method' | 'body'> = {}): Promise<APIResponse<T>> {
+    return this.request<T>(path, {
+      ...options,
+      method: 'PUT',
+      body: JSON.stringify(data)
+    });
+  }
+
+  async delete<T>(path: string, options: Omit<RequestOptions, 'method' | 'body'> = {}): Promise<APIResponse<T>> {
+    return this.request<T>(path, { ...options, method: 'DELETE' });
   }
 
   /**
@@ -195,7 +339,7 @@ export class APIClient {
 
     // Check cache for GET requests
     if (cache && this.shouldCache(method)) {
-      const cacheKey = this.getCacheKey({ endpoint, method, body });
+      const cacheKey = this.generateCacheKey(endpoint, { method, body });
       const cachedData = apiCache.get<T>(cacheKey);
       if (cachedData) {
         return cachedData;
@@ -249,7 +393,7 @@ export class APIClient {
 
               // Cache successful GET requests
               if (cache && this.shouldCache(method)) {
-                const cacheKey = this.getCacheKey(config);
+                const cacheKey = this.generateCacheKey(endpoint, config);
                 apiCache.set(cacheKey, responseData);
               }
 

@@ -1,0 +1,5 @@
+[functions.email-webhooks]
+verify_jwt = false
+max_batch_size = 100
+memory_limit = 256
+timeout_ms = 10000 

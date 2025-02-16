@@ -1,50 +1,41 @@
-import { createClient } from 'npm:@supabase/supabase-js@2.39.0';
-import { Client } from 'npm:@sendgrid/client@8.1.0';
-import { MailService } from 'npm:@sendgrid/mail@8.1.0';
+import { createClient } from '@supabase/supabase-js';
+import { emailService } from '../../../src/lib/email/service';
 
-async function logError(supabase: any, error: any, metadata: any = {}) {
+// Helper function to update email status
+async function updateEmailStatus(
+  supabase: any,
+  emailId: string,
+  status: 'sent' | 'failed',
+  error?: string
+) {
+  const { error: updateError } = await supabase
+    .from('emails')
+    .update({
+      status,
+      error_message: error,
+      sent_at: status === 'sent' ? new Date().toISOString() : null,
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', emailId);
+
+  if (updateError) {
+    console.error('Error updating email status:', updateError);
+  }
+}
+
+// Helper function to log errors
+async function logError(supabase: any, error: Error, context: Record<string, any>) {
   try {
-    console.error('Logging error to database:', {
-      function_name: 'send-scheduled-emails',
-      error_message: error instanceof Error ? error.message : String(error),
-      error_stack: error instanceof Error ? error.stack : undefined,
-      metadata
-    });
-    
     await supabase
       .from('function_logs')
       .insert([{
         function_name: 'send-scheduled-emails',
-        error_message: error instanceof Error ? error.message : String(error),
-        error_stack: error instanceof Error ? error.stack : undefined,
-        timestamp: new Date().toISOString(),
-        metadata
+        error_message: error.message,
+        error_stack: error.stack,
+        context: context
       }]);
   } catch (logError) {
-    console.error('Failed to log error to database:', logError);
-  }
-}
-
-async function updateEmailStatus(supabase: any, emailId: string, status: 'sent' | 'failed', errorMessage?: string) {
-  const update = {
-    status,
-    updated_at: new Date().toISOString(),
-    ...(status === 'sent' ? { sent_at: new Date().toISOString() } : {}),
-    ...(errorMessage ? { error_message: errorMessage } : {})
-  };
-
-  const { error } = await supabase
-    .from('emails')
-    .update(update)
-    .eq('id', emailId);
-
-  if (error) {
-    console.error('Error updating email status:', error);
-    await logError(supabase, error, { 
-      stage: 'update_status', 
-      email_id: emailId, 
-      attempted_status: status 
-    });
+    console.error('Error logging to database:', logError);
   }
 }
 
@@ -73,9 +64,9 @@ Deno.serve(async (req) => {
       }
     });
 
-    // Initialize SendGrid
-    const mailService = new MailService();
-    mailService.setApiKey(sendgridKey);
+    // Initialize email service
+    emailService.initialize('sendgrid', { apiKey: sendgridKey });
+    const provider = emailService.getProvider();
 
     // Get pending emails using the database function
     const { data: pendingEmails, error: emailsError } = await supabase
@@ -105,31 +96,44 @@ Deno.serve(async (req) => {
         try {
           console.log('Sending email:', email.id);
 
-          // Prepare email data for SendGrid
-          const msg = {
+          // Check sending limits
+          const limits = await provider.checkSendingLimits(email.user_id);
+          if (limits.remainingToday <= 0) {
+            throw new Error('Daily sending limit reached');
+          }
+
+          // Send email using the provider
+          const result = await provider.sendEmail({
             to: email.recipient_email,
             from: {
               email: email.user_email,
               name: email.user_name
             },
             subject: email.subject,
-            html: email.content,
-            customArgs: {
-              email_id: email.id,
-              campaign_id: email.campaign_id
+            content: email.content,
+            metadata: {
+              emailId: email.id,
+              campaignId: email.campaign_id,
+              userId: email.user_id
+            },
+            trackingSettings: {
+              clickTracking: true,
+              openTracking: true
             }
-          };
+          });
 
-          // Send the email
-          await mailService.send(msg);
-          
+          if (!result.success) {
+            throw new Error(result.error || 'Failed to send email');
+          }
+
           // Update status to sent
           await updateEmailStatus(supabase, email.id, 'sent');
 
           return {
             email_id: email.id,
             campaign_id: email.campaign_id,
-            status: 'sent'
+            status: 'sent',
+            message_id: result.messageId
           };
         } catch (error) {
           console.error('Error sending email:', email.id, error);
@@ -166,17 +170,14 @@ Deno.serve(async (req) => {
 
   } catch (error) {
     console.error('Function error:', error);
-    await logError(supabase, error, { stage: 'main' });
+    
+    if (supabase) {
+      await logError(supabase, error, { stage: 'function_execution' });
+    }
 
     return new Response(
-      JSON.stringify({ 
-        error: 'Function execution failed', 
-        details: error.message 
-      }),
-      { 
-        status: 500,
-        headers: { 'Content-Type': 'application/json' }
-      }
+      JSON.stringify({ error: 'Internal server error', details: error.message }),
+      { headers: { 'Content-Type': 'application/json' }, status: 500 }
     );
   }
 });
