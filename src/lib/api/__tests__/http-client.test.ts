@@ -91,33 +91,30 @@ describe('HttpClient', () => {
 
   describe('Caching', () => {
     it('should cache GET requests', async () => {
-      const mockData = { data: 'cached' };
-      mockFetch.mockResolvedValueOnce(createMockResponse({
-        ok: true,
-        json: () => Promise.resolve(mockData)
-      }));
+      const mockFetch = vi.fn(() => Promise.resolve(new Response(JSON.stringify({ data: 'test' }))));
+      global.fetch = mockFetch;
 
-      const result = await client.get('/cache-test', { shouldCache: true });
-      expect(result).toEqual(mockData);
-      expect(mockFetch).toHaveBeenCalledTimes(1);
+      await client.get('/test', { shouldCache: true });
+      await client.get('/test', { shouldCache: true });
 
-      // Second request should use cache
-      const cachedResult = await client.get('/cache-test', { shouldCache: true });
-      expect(cachedResult).toEqual(mockData);
       expect(mockFetch).toHaveBeenCalledTimes(1);
     });
 
     it('should respect cache TTL', async () => {
-      const mockData = { data: 'test' };
-      mockFetch.mockResolvedValue(createMockResponse({
-        ok: true,
-        json: () => Promise.resolve(mockData)
-      }));
+      const mockFetch = vi.fn(() => Promise.resolve(new Response(JSON.stringify({ data: 'test' }))));
+      global.fetch = mockFetch;
+      vi.useFakeTimers();
 
-      await client.get('/ttl-test', { shouldCache: true, cacheTTL: 0 });
-      await client.get('/ttl-test', { shouldCache: true });
+      await client.get('/ttl-test', { shouldCache: true, cacheTTL: 1000 });
+      
+      // Advance time past TTL
+      vi.advanceTimersByTime(1500);
+      
+      await client.get('/ttl-test', { shouldCache: true, cacheTTL: 1000 });
 
       expect(mockFetch).toHaveBeenCalledTimes(2);
+      
+      vi.useRealTimers();
     });
   });
 

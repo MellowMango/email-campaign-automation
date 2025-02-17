@@ -1,5 +1,5 @@
 {
-  "schedule": "* * * * *",
-  "function_name": "send-scheduled-emails",
+  "name": "send-scheduled-emails",
+  "schedule": "*/1 * * * *",
   "enabled": true
 } 

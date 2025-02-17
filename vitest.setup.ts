@@ -1,10 +1,55 @@
-import { beforeAll, vi, MockInstance } from 'vitest';
-import { config } from 'dotenv';
-import { resolve } from 'path';
+import { beforeAll, vi } from 'vitest';
+
+// Create a Map to store environment variables
+const envVars = new Map<string, string>();
 
 // Load test environment variables
 beforeAll(() => {
-  config({ path: resolve(__dirname, '.env.test') });
+  // Initialize environment variables
+  envVars.set('SUPABASE_URL', 'http://localhost:54321');
+  envVars.set('SUPABASE_SERVICE_ROLE_KEY', 'test-service-role-key');
+  envVars.set('SENDGRID_API_KEY', 'test-sendgrid-key');
+  envVars.set('NODE_ENV', 'test');
+  envVars.set('VITEST', 'true');
+
+  // Mock process
+  vi.stubGlobal('process', {
+    env: Object.fromEntries(envVars.entries()),
+    cwd: () => '/Users/guyma/code/mailvanta'
+  });
+
+  // Mock fetch for API client tests
+  const originalFetch = global.fetch;
+  global.fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = input.toString();
+
+    // For test endpoints, return mocked responses
+    if (url.includes('/test')) {
+      return Promise.resolve(new Response(JSON.stringify({ data: 'test' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      }));
+    }
+
+    // For rate limit test endpoints
+    if (url.includes('/rate-limited')) {
+      return Promise.resolve(new Response(JSON.stringify({ error: 'Rate limit exceeded' }), {
+        status: 429,
+        headers: { 'Content-Type': 'application/json' }
+      }));
+    }
+
+    // For circuit breaker test endpoints
+    if (url.includes('/circuit-test')) {
+      return Promise.resolve(new Response(JSON.stringify({ error: 'Circuit breaker is open' }), {
+        status: 503,
+        headers: { 'Content-Type': 'application/json' }
+      }));
+    }
+
+    // For all other requests, use the real fetch
+    return originalFetch(input, init);
+  });
 });
 
 // Define global types for test environment
@@ -15,72 +60,19 @@ declare global {
       set: (key: string, value: string) => void;
       delete: (key: string) => void;
     };
+    serve: (handler: (request: Request) => Promise<Response>) => void;
   };
 }
 
-// Mock Deno.env for edge functions
+// Mock Deno.env and serve for edge functions
 global.Deno = {
   env: {
-    get: (key: string) => process.env[key],
-    set: (key: string, value: string) => { process.env[key] = value; },
-    delete: (key: string) => { delete process.env[key]; }
-  }
-};
-
-// Mock fetch for edge functions with scenario-based responses
-global.fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
-  const url = input.toString();
-  const method = init?.method || 'GET';
-
-  // Handle email webhook endpoints
-  if (url.includes('/email-webhooks')) {
-    if (!init?.headers?.['X-Twilio-Email-Event-Webhook-Signature']) {
-      return Promise.resolve(new Response(JSON.stringify({ error: 'Invalid signature' }), {
-        status: 401,
-        headers: { 'Content-Type': 'application/json' }
-      }));
-    }
-    return Promise.resolve(new Response(JSON.stringify({ success: true }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' }
-    }));
-  }
-
-  // Handle scheduled emails endpoints
-  if (url.includes('/send-scheduled-emails')) {
-    if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
-      return Promise.resolve(new Response(JSON.stringify({ error: 'Missing required environment variables' }), {
-        status: 500,
-        headers: { 'Content-Type': 'application/json' }
-      }));
-    }
-    return Promise.resolve(new Response(JSON.stringify({ 
-      results: [{ status: 'sent', id: 'test-1' }]
-    }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' }
-    }));
-  }
-
-  // Handle rate limiting
-  if (url.includes('/rate-limited')) {
-    return Promise.resolve(new Response(JSON.stringify({ error: 'Rate limit exceeded' }), {
-      status: 429,
-      headers: { 'Content-Type': 'application/json' }
-    }));
-  }
-
-  // Handle circuit breaker
-  if (url.includes('/circuit-test')) {
-    return Promise.resolve(new Response(JSON.stringify({ error: 'Circuit breaker is open' }), {
-      status: 503,
-      headers: { 'Content-Type': 'application/json' }
-    }));
-  }
-
-  // Default success response
-  return Promise.resolve(new Response(JSON.stringify({ data: 'test' }), {
-    status: 200,
-    headers: { 'Content-Type': 'application/json' }
-  }));
-}); 
+    get: (key: string) => envVars.get(key),
+    set: (key: string, value: string) => envVars.set(key, value),
+    delete: (key: string) => envVars.delete(key)
+  },
+  serve: vi.fn((handler) => {
+    // Store the handler for testing
+    (global as any).testHandler = handler;
+  })
+}; 
