@@ -4,6 +4,7 @@ import type { Profile } from '../lib/supabase/client';
 import { Button } from '../components/shadcn/Button';
 import { Card } from '../components/shadcn/Card';
 import { DomainSetup } from '../components/settings/DomainSetup';
+import { UsageDashboard } from '../components/usage/UsageDashboard';
 
 export default function Settings() {
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -123,9 +124,14 @@ export default function Settings() {
 
   return (
     <div className="container mx-auto px-4 py-8">
-      <h1 className="text-3xl font-bold mb-8">Account Settings</h1>
+      <h1 className="text-3xl font-bold mb-8">Settings</h1>
 
-      <div className="space-y-8 max-w-4xl">
+      <div className="space-y-8">
+        <section>
+          <h2 className="text-2xl font-semibold mb-4">Usage & Billing</h2>
+          <UsageDashboard />
+        </section>
+
         <Card>
           <h2 className="text-xl font-bold mb-6">Profile Settings</h2>
           <form onSubmit={handleUpdateProfile} className="space-y-6">

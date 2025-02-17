@@ -112,12 +112,20 @@ export function Header() {
               </button>
             </>
           ) : (
-            <Link
-              to="/auth"
-              className="text-gray-300 hover:text-white transition-colors duration-200"
-            >
-              Sign In
-            </Link>
+            <>
+              <Link
+                to="/pricing"
+                className="text-gray-300 hover:text-white transition-colors duration-200"
+              >
+                Pricing
+              </Link>
+              <Link
+                to="/auth"
+                className="text-gray-300 hover:text-white transition-colors duration-200"
+              >
+                Sign In
+              </Link>
+            </>
           )}
         </nav>
         {/* Mobile Navigation Toggle */}

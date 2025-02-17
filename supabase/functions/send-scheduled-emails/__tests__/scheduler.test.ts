@@ -149,6 +149,17 @@ describe('Send Scheduled Emails Integration Tests', () => {
     expect(pendingEmails.length).toBe(5);
   });
 
+  it('should verify cron job is scheduled and active', async () => {
+    // Check if the cron job exists and is active
+    const { data: cronJob } = await supabase
+      .rpc('check_cron_job', { job_name: 'send-scheduled-emails' });
+
+    expect(cronJob).toBeDefined();
+    expect(cronJob.exists).toBe(true);
+    expect(cronJob.is_active).toBe(true);
+    expect(cronJob.schedule).toBe('* * * * *');
+  });
+
   it('should handle missing environment variables', async () => {
     // Temporarily unset required env vars
     const originalUrl = Deno.env.get('SUPABASE_URL');

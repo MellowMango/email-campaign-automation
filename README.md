@@ -648,3 +648,90 @@ Emails are stored with:
 - Allows easy visualization of sequence progression
 
 This feature streamlines the creation of cohesive email sequences while maintaining flexibility for customization.
+
+### Database Migrations and Testing
+
+#### Migration System
+The project uses Supabase's migration system to manage database schema changes. Migrations are located in `supabase/migrations/` and follow this naming convention:
+- `YYYYMMDD_description.sql` for base migrations
+- `YYYYMMDDXXX_description.sql` for more granular versioning within a day
+
+Key migrations include:
+1. `20240325_enable_extensions.sql`: Sets up required Postgres extensions
+2. `20240326_consolidated_schema.sql`: Base schema with core tables
+3. `20240400331_create_http_types.sql`: Custom types for HTTP operations
+4. `20240400333_create_contacts.sql`: Contact management system
+5. `20240400334_add_stripe_subscriptions.sql`: Stripe integration
+6. `20240400335_add_usage_tracking.sql`: Usage tracking system
+
+#### Required Functions for Billing System
+The following functions need to be implemented to complete the billing system setup:
+
+1. **HTTP Functions**
+   ```sql
+   -- HTTP POST function for making external requests
+   CREATE OR REPLACE FUNCTION http_post(
+       url text,
+       headers jsonb,
+       body jsonb
+   ) RETURNS http_response
+   ```
+
+2. **Billing Calculation**
+   ```sql
+   -- Function to calculate usage-based billing
+   CREATE OR REPLACE FUNCTION invoke_billing_calculation()
+   RETURNS void
+   ```
+
+#### Testing System
+The project includes automated tests in several migrations:
+
+1. **Billing Setup Tests** (`20240400339_test_billing_setup.sql`)
+   - Verifies required extensions (pg_net, pg_cron)
+   - Validates app_settings configuration
+   - Tests logging system
+   - Validates HTTP functions
+   - Tests auth header passing
+   - Verifies billing calculation
+
+2. **Test Running**
+   ```bash
+   # Run all tests
+   supabase db reset
+
+   # Run specific test
+   psql "postgres://postgres:postgres@localhost:54322/postgres" -f supabase/migrations/20240400339_test_billing_setup.sql
+   ```
+
+3. **Test Results**
+   Tests output results using Postgres NOTICE messages:
+   ```
+   NOTICE: Starting billing setup tests...
+   NOTICE: ----------------------------
+   NOTICE: PASS: pg_net extension is installed
+   NOTICE: PASS: app_settings table exists
+   NOTICE: PASS: logs table is working
+   NOTICE: FAIL: Error testing HTTP function
+   ...
+   ```
+
+#### Running Migrations
+```bash
+# Reset database and run all migrations
+supabase db reset
+
+# Create new migration
+supabase migration new my_migration_name
+
+# Verify migration status
+supabase db remote changes
+```
+
+#### Migration Best Practices
+1. Each migration should be atomic and self-contained
+2. Include rollback logic where possible
+3. Use IF NOT EXISTS clauses for idempotency
+4. Add appropriate indexes for performance
+5. Implement RLS policies for security
+6. Test migrations locally before deployment

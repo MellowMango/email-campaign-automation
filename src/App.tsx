@@ -13,6 +13,7 @@ const Campaign = React.lazy(() => import('./pages/Campaign'));
 const Campaigns = React.lazy(() => import('./pages/Campaigns'));
 const Contacts = React.lazy(() => import('./pages/Contacts'));
 const Settings = React.lazy(() => import('./pages/Settings'));
+const Pricing = React.lazy(() => import('./pages/Pricing'));
 
 // Protected Route wrapper
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -54,6 +55,7 @@ export function App() {
             <Routes>
               <Route path="/" element={<Landing />} />
               <Route path="/auth" element={<Auth />} />
+              <Route path="/pricing" element={<Pricing />} />
               <Route
                 path="/dashboard"
                 element={

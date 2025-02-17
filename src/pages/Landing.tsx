@@ -397,14 +397,24 @@ export default function Landing() {
             </p>
             {!user && (
               <div className="space-y-4">
-                <Link to="/auth">
-                  <Button size="lg" className="px-10 py-5 text-lg flex items-center justify-center">
-                    Start Your Free Trial
-                    <svg className="w-5 h-5 ml-2 transition-transform duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 7l5 5m0 0l-5 5m5-5H6" />
-                    </svg>
-                  </Button>
-                </Link>
+                <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+                  <Link to="/pricing">
+                    <Button size="lg" variant="primary" className="px-10 py-5 text-lg flex items-center justify-center">
+                      View Pricing
+                      <svg className="w-5 h-5 ml-2 transition-transform duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                      </svg>
+                    </Button>
+                  </Link>
+                  <Link to="/auth">
+                    <Button size="lg" variant="secondary" className="px-10 py-5 text-lg flex items-center justify-center">
+                      Start Free Trial
+                      <svg className="w-5 h-5 ml-2 transition-transform duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                      </svg>
+                    </Button>
+                  </Link>
+                </div>
                 <p className="text-sm text-gray-400">
                   No credit card • 14-day trial • Full feature access
                 </p>
