@@ -5,8 +5,12 @@ import { rateLimiter } from './rateLimit';
 import { circuitBreaker } from './circuitBreaker';
 
 // Initialize Supabase client
-const supabaseUrl = process.env.SUPABASE_URL || import.meta.env.VITE_SUPABASE_URL || '';
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY || '';
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseServiceKey = import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY;
+
+if (!supabaseUrl) throw new Error('Missing VITE_SUPABASE_URL');
+if (!supabaseServiceKey) throw new Error('Missing VITE_SUPABASE_SERVICE_ROLE_KEY');
+
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
 const MAX_PAYLOAD_SIZE = 5 * 1024 * 1024; // 5MB
