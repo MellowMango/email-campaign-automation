@@ -20,6 +20,7 @@ interface PricingPlan {
   };
   is_active: boolean;
   sort_order: number;
+  is_admin?: boolean;
 }
 
 interface Subscription {
@@ -36,6 +37,7 @@ interface Subscription {
   ended_at: string | null;
   trial_start: string | null;
   trial_end: string | null;
+  is_admin?: boolean;
   plan?: PricingPlan;
 }
 
@@ -74,9 +76,7 @@ export function useSubscription() {
   const stripeService = new StripeService();
 
   useEffect(() => {
-    if (user) {
-      fetchSubscriptionData();
-    }
+    fetchSubscriptionData();
   }, [user]);
 
   const fetchSubscriptionData = async () => {
@@ -84,26 +84,12 @@ export function useSubscription() {
       setLoading(true);
       setError(null);
 
-      // Fetch subscription with plan details
-      const { data: sub, error: subError } = await supabase
-        .from('subscriptions')
-        .select('*, plan:pricing_plans(*)')
-        .eq('user_id', user!.id)
-        .single();
-
-      if (subError && subError.code !== 'PGRST116') { // PGRST116 is "no rows returned"
-        throw subError;
-      }
-
-      if (sub) {
-        setSubscription(sub);
-      }
-
-      // Fetch all active plans
+      // Always fetch active plans, even for unauthenticated users
       const { data: activePlans, error: plansError } = await supabase
         .from('pricing_plans')
         .select('*')
         .eq('is_active', true)
+        .eq('is_admin', false) // Don't show admin plans in the list
         .order('sort_order');
 
       if (plansError) {
@@ -112,32 +98,57 @@ export function useSubscription() {
 
       setPlans(activePlans);
 
-      // Fetch payment methods
-      const { data: methods, error: methodsError } = await supabase
-        .from('payment_methods')
-        .select('*')
-        .eq('user_id', user!.id)
-        .order('is_default', { ascending: false });
+      // Only fetch user-specific data if authenticated
+      if (user) {
+        // Fetch subscription with plan details
+        const { data: sub, error: subError } = await supabase
+          .from('subscriptions')
+          .select('*, plan:pricing_plans(*)')
+          .eq('user_id', user.id)
+          .single();
 
-      if (methodsError) {
-        throw methodsError;
+        if (subError && subError.code !== 'PGRST116') { // PGRST116 is "no rows returned"
+          throw subError;
+        }
+
+        if (sub) {
+          setSubscription(sub);
+        }
+
+        // Only fetch payment methods and invoices for non-admin subscriptions
+        if (sub && !sub.is_admin) {
+          // Fetch payment methods
+          const { data: methods, error: methodsError } = await supabase
+            .from('payment_methods')
+            .select('*')
+            .eq('user_id', user.id)
+            .order('is_default', { ascending: false });
+
+          if (methodsError) {
+            throw methodsError;
+          }
+
+          setPaymentMethods(methods);
+
+          // Fetch recent invoices
+          const { data: recentInvoices, error: invoicesError } = await supabase
+            .from('invoices')
+            .select('*')
+            .eq('user_id', user.id)
+            .order('created_at', { ascending: false })
+            .limit(12);
+
+          if (invoicesError) {
+            throw invoicesError;
+          }
+
+          setInvoices(recentInvoices);
+        } else {
+          // Clear payment methods and invoices for admin subscriptions
+          setPaymentMethods([]);
+          setInvoices([]);
+        }
       }
-
-      setPaymentMethods(methods);
-
-      // Fetch recent invoices
-      const { data: recentInvoices, error: invoicesError } = await supabase
-        .from('invoices')
-        .select('*')
-        .eq('user_id', user!.id)
-        .order('created_at', { ascending: false })
-        .limit(12);
-
-      if (invoicesError) {
-        throw invoicesError;
-      }
-
-      setInvoices(recentInvoices);
     } catch (err) {
       console.error('Error fetching subscription data:', err);
       setError(err instanceof Error ? err.message : 'An error occurred');

@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useSubscription } from '../hooks/useSubscription';
+import { useAuth } from '../contexts/AuthContext';
 import { Button } from '../components/shadcn/Button';
 import { Card } from '../components/shadcn/Card';
 import { loadStripe } from '@stripe/stripe-js';
@@ -98,11 +99,20 @@ function CheckoutForm({ planId, onSuccess }: { planId: string; onSuccess: () => 
 
 export default function Pricing() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const { plans, subscription, loading, error } = useSubscription();
   const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
 
   const handleSuccess = () => {
     navigate('/dashboard');
+  };
+
+  const handleGetStarted = () => {
+    if (!user) {
+      navigate('/auth');
+      return;
+    }
+    setSelectedPlan(plans[0]?.id);
   };
 
   const formatPrice = (amount: number) => {
@@ -235,15 +245,22 @@ export default function Pricing() {
               <CheckoutForm planId={selectedPlan} onSuccess={handleSuccess} />
             </Elements>
           ) : (
-            <Button
-              className="w-full"
-              size="lg"
-              variant="primary"
-              disabled={subscription?.plan_id === plans[0]?.id}
-              onClick={() => setSelectedPlan(plans[0]?.id)}
-            >
-              {subscription?.plan_id === plans[0]?.id ? 'Current Plan' : 'Get Started'}
-            </Button>
+            <>
+              <Button
+                className="w-full"
+                size="lg"
+                variant="primary"
+                disabled={subscription?.plan_id === plans[0]?.id}
+                onClick={handleGetStarted}
+              >
+                {subscription?.plan_id === plans[0]?.id ? 'Current Plan' : 'Get Started'}
+              </Button>
+              {!user && (
+                <p className="text-sm text-gray-400 text-center mt-4">
+                  You'll need to <Link to="/auth" className="text-primary hover:text-primary-hover">sign in</Link> to subscribe
+                </p>
+              )}
+            </>
           )}
         </Card>
 
