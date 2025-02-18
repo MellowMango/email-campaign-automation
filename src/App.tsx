@@ -4,6 +4,8 @@ import { useAuth } from './contexts/AuthContext';
 import React, { useEffect } from 'react';
 import { Header } from './components/common/Header';
 import { initializeAPI } from './lib/api/init';
+import { useSubscription } from './hooks/useSubscription';
+import { useNavigate } from 'react-router-dom';
 
 // Lazy load pages for better performance
 const Landing = React.lazy(() => import('./pages/Landing'));
@@ -17,9 +19,11 @@ const Pricing = React.lazy(() => import('./pages/Pricing'));
 
 // Protected Route wrapper
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuth();
+  const { user, loading: authLoading } = useAuth();
+  const { subscription, loading: subLoading } = useSubscription();
 
-  if (loading) {
+  // Show loading state while checking auth and subscription
+  if (authLoading || subLoading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="text-white">Loading...</div>
@@ -27,8 +31,14 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
     );
   }
 
+  // If no user, redirect to auth
   if (!user) {
     return <Navigate to="/auth" />;
+  }
+
+  // If user is not admin and either has no subscription or it's not active, redirect to pricing
+  if (!subscription?.is_admin && (!subscription || subscription.status !== 'active')) {
+    return <Navigate to="/pricing" />;
   }
 
   return <>{children}</>;
