@@ -1022,7 +1022,7 @@ jobs:
 
 This analysis reveals that while the basic build setup is functional, there are significant improvements needed in the build configuration and deployment process to ensure reliable, efficient, and secure deployments.
 
-## Sprint Planning (Next 2 Weeks)
+### Sprint Planning (Next 2 Weeks)
 
 ### Sprint Goals
 1. Complete and stabilize current feature set
@@ -1048,31 +1048,14 @@ This analysis reveals that while the basic build setup is functional, there are 
 
 #### Days 3-4: Stripe Integration
 1. **Basic Stripe Setup**
-   ```typescript
-   // src/services/stripe.service.ts
-   export class StripeService {
-     async createSubscription(plan: PlanType): Promise<Subscription> {
-       // Handle subscription creation
-     }
-     
-     async handleWebhook(event: StripeWebhookEvent): Promise<void> {
-       // Handle webhook events
-     }
-   }
+  - Implement basic subscription management
+  - Add webhook handling
+  - Set up test mode
 
 2. **Database Schema Updates**
-   ```sql
-   -- Add subscription tables
-   CREATE TABLE subscriptions (
-     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-     user_id uuid REFERENCES auth.users(id),
-     stripe_subscription_id text,
-     plan_type text,
-     status text,
-     current_period_end timestamptz,
-     created_at timestamptz DEFAULT now()
-   );
-   ```
+   - Add subscription tables
+   - Add webhook handling
+   - Set up test mode
 
 
 #### Day 5: UI Polish & Bug Fixes
