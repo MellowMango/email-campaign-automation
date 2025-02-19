@@ -7,6 +7,10 @@ import { Card } from '../components/shadcn/Card';
 import { CampaignSetup, CampaignSetupData } from '../components/campaign/CampaignSetup';
 import { supabase } from '../lib/supabase/client';
 import type { Contact } from '../types';
+import { LoadingState } from '../components/common/LoadingState';
+import { logLoadingState, withTestDelay } from '../utils/test-helpers';
+import { ErrorMessage } from '../components/common/ErrorMessage';
+import { getErrorMessage } from '../utils/error-helpers';
 
 export default function Dashboard() {
   const { user } = useAuth();
@@ -15,35 +19,48 @@ export default function Dashboard() {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [totalContacts, setTotalContacts] = useState(0);
   const [contactsLoading, setContactsLoading] = useState(true);
+  const [error, setError] = useState<{ message: string; suggestion: string } | null>(null);
   const navigate = useNavigate();
 
   // Fetch contacts when component mounts
   useEffect(() => {
     const fetchContacts = async () => {
+      logLoadingState('Dashboard-Contacts', true);
       try {
         // Get total count
-        const { count: totalCount, error: countError } = await supabase
-          .from('contacts')
-          .select('*', { count: 'exact', head: true })
-          .eq('user_id', user?.id);
+        const { count: totalCount, error: countError } = await withTestDelay(
+          Promise.resolve(
+            supabase
+              .from('contacts')
+              .select('*', { count: 'exact', head: true })
+              .eq('user_id', user?.id)
+          )
+        ) as { count: number | null; error: Error | null };
 
         if (countError) throw countError;
         setTotalContacts(totalCount || 0);
 
         // Get recent contacts
-        const { data, error } = await supabase
-          .from('contacts')
-          .select('*')
-          .eq('user_id', user?.id)
-          .order('created_at', { ascending: false })
-          .limit(5);
+        const { data, error } = await withTestDelay(
+          Promise.resolve(
+            supabase
+              .from('contacts')
+              .select('*')
+              .eq('user_id', user?.id)
+              .order('created_at', { ascending: false })
+              .limit(5)
+          )
+        ) as { data: Contact[] | null; error: Error | null };
 
         if (error) throw error;
         setContacts(data || []);
       } catch (err) {
-        console.error('Error fetching contacts:', err);
+        const { error: errError, suggestion: errSuggestion } = getErrorMessage(err);
+        console.error('Error fetching contacts:', errError);
+        setError({ message: errError, suggestion: errSuggestion });
       } finally {
         setContactsLoading(false);
+        logLoadingState('Dashboard-Contacts', false);
       }
     };
 
@@ -87,17 +104,21 @@ export default function Dashboard() {
   };
 
   if (campaignsLoading || contactsLoading) {
-    return (
-      <div className="container mx-auto px-4 py-8 flex items-center justify-center">
-        <div className="text-gray-300">Loading...</div>
-      </div>
-    );
+    return <LoadingState variant="skeleton" fullPage rows={4} />;
   }
 
   if (campaignsError) {
+    const { error, suggestion } = getErrorMessage(campaignsError);
     return (
-      <div className="container mx-auto px-4 py-8 flex items-center justify-center">
-        <div className="text-red-500">Error: {campaignsError.message}</div>
+      <div className="container mx-auto px-4 py-8">
+        <ErrorMessage 
+          error={error}
+          suggestion={suggestion}
+          action={{
+            label: 'Refresh Page',
+            onClick: () => window.location.reload()
+          }}
+        />
       </div>
     );
   }
@@ -107,6 +128,22 @@ export default function Dashboard() {
   const respondedContacts = contacts.filter(c => c.status === 'responded').length;
   const responseRate = totalContacts ? Math.round((respondedContacts / totalContacts) * 100) : 0;
   const conversionRate = totalContacts ? Math.round((convertedContacts / totalContacts) * 100) : 0;
+
+  // Update status checks in the component
+  const getStatusColor = (status: Contact['status']) => {
+    switch (status) {
+      case 'converted':
+        return 'text-green-500';
+      case 'responded':
+        return 'text-blue-500';
+      case 'contacted':
+        return 'text-yellow-500';
+      case 'unsubscribed':
+        return 'text-red-500';
+      default:
+        return 'text-gray-500';
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gray-900 text-white">
@@ -149,6 +186,14 @@ export default function Dashboard() {
           <CampaignSetup
             onClose={() => setIsCreating(false)}
             onSave={handleCreateCampaign}
+          />
+        )}
+
+        {error && (
+          <ErrorMessage
+            error={error.message}
+            suggestion={error.suggestion}
+            className="mb-4"
           />
         )}
 
@@ -216,13 +261,7 @@ export default function Dashboard() {
                         <td className="py-2 px-2">{contact.first_name} {contact.last_name}</td>
                         <td className="py-2 px-2">{contact.email}</td>
                         <td className="py-2 px-2">
-                          <span className={`px-2 py-1 rounded text-sm ${
-                            contact.status === 'converted'
-                              ? 'bg-green-900 text-green-300'
-                              : contact.status === 'responded'
-                              ? 'bg-blue-900 text-blue-300'
-                              : 'bg-gray-700 text-gray-300'
-                          }`}>
+                          <span className={`px-2 py-1 rounded text-sm ${getStatusColor(contact.status)}`}>
                             {contact.status.charAt(0).toUpperCase() + contact.status.slice(1)}
                           </span>
                         </td>
@@ -234,7 +273,11 @@ export default function Dashboard() {
                                 style={{ width: `${Math.min(100, contact.engagement_score)}%` }}
                               />
                             </div>
-                            <span className="text-sm">{contact.engagement_score}</span>
+                            {typeof contact.engagement_score === 'number' && (
+                              <div className="text-sm text-gray-500">
+                                Engagement Score: {contact.engagement_score.toFixed(1)}
+                              </div>
+                            )}
                           </div>
                         </td>
                       </tr>

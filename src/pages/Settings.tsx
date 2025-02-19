@@ -5,6 +5,7 @@ import { Button } from '../components/shadcn/Button';
 import { Card } from '../components/shadcn/Card';
 import { DomainSetup } from '../components/settings/DomainSetup';
 import { UsageDashboard } from '../components/usage/UsageDashboard';
+import { LoadingState } from '../components/common/LoadingState';
 
 export default function Settings() {
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -115,11 +116,7 @@ export default function Settings() {
   };
 
   if (loading) {
-    return (
-      <div className="container mx-auto px-4 py-8 flex items-center justify-center">
-        <div className="text-gray-300">Loading...</div>
-      </div>
-    );
+    return <LoadingState variant="skeleton" fullPage rows={3} />;
   }
 
   return (

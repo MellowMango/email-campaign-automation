@@ -1,11 +1,12 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import { useAuth } from './contexts/AuthContext';
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Header } from './components/common/Header';
 import { initializeAPI } from './lib/api/init';
 import { useSubscription } from './hooks/useSubscription';
 import { useNavigate } from 'react-router-dom';
+import { LoadingState } from './components/common/LoadingState';
 
 // Lazy load pages for better performance
 const Landing = React.lazy(() => import('./pages/Landing'));
@@ -20,13 +21,23 @@ const Pricing = React.lazy(() => import('./pages/Pricing'));
 // Protected Route wrapper
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading: authLoading } = useAuth();
-  const { subscription, loading: subLoading } = useSubscription();
+  const { subscription, loading: subLoading, refresh: refreshSubscription } = useSubscription();
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
+
+  useEffect(() => {
+    if (user && isInitialLoad) {
+      // Explicitly refresh subscription data on initial load
+      refreshSubscription().then(() => {
+        setIsInitialLoad(false);
+      });
+    }
+  }, [user, isInitialLoad, refreshSubscription]);
 
   // Show loading state while checking auth and subscription
-  if (authLoading || subLoading) {
+  if (authLoading || subLoading || (user && isInitialLoad)) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="text-white">Loading...</div>
+        <LoadingState variant="spinner" size="lg" text="Loading..." />
       </div>
     );
   }

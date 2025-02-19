@@ -806,3 +806,207 @@ supabase db remote changes
 4. Add appropriate indexes for performance
 5. Implement RLS policies for security
 6. Test migrations locally before deployment
+
+## User Management and Authentication
+
+### User Types and Access Control
+The system implements three distinct user types:
+1. **Admin Users**
+   - Full access to all features
+   - Unlimited usage
+   - No billing restrictions
+   - Access to admin-only features
+
+2. **Paying Users**
+   - Access based on subscription plan
+   - Usage limits based on plan
+   - Usage-based billing
+
+3. **Guest Users**
+   - Limited access
+   - Redirected to pricing page
+   - No feature access until subscribed
+
+### Database Functions
+Two key functions are available for user management:
+
+1. **Check User Status**
+```sql
+-- Check if a user is admin, paying, or guest
+SELECT * FROM check_user_status('user-uuid-here');
+
+-- Returns:
+{
+  "status": "admin|paying|guest",
+  "details": {
+    "user_id": "uuid",
+    "subscription_id": "uuid",
+    "plan_name": "string",
+    "subscription_status": "string",
+    "is_admin": boolean,
+    "current_period_end": "timestamp"
+  }
+}
+```
+
+2. **Make User Admin**
+```sql
+-- Promote a user to admin status
+SELECT make_user_admin('user-uuid-here');
+```
+
+### User Status View
+A convenient view is available for checking all users' statuses:
+```sql
+SELECT * FROM user_status_summary;
+```
+
+### Authentication Flow
+The sign-in process follows this sequence:
+1. User signs in with email/password
+2. System checks subscription status
+3. Routes user based on status:
+   - Admin → Dashboard
+   - Active Subscription → Dashboard
+   - No Subscription → Pricing page
+
+### Protected Routes
+All protected routes implement these checks:
+1. Authentication status
+2. Subscription status
+3. Admin privileges
+
+Example implementation:
+```typescript
+function ProtectedRoute({ children }) {
+  const { user, loading: authLoading } = useAuth();
+  const { subscription, loading: subLoading } = useSubscription();
+
+  if (authLoading || subLoading) {
+    return <LoadingSpinner />;
+  }
+
+  if (!user) {
+    return <Navigate to="/auth" />;
+  }
+
+  if (!subscription?.is_admin && (!subscription || subscription.status !== 'active')) {
+    return <Navigate to="/pricing" />;
+  }
+
+  return <>{children}</>;
+}
+```
+
+### Admin Tools
+Helper functions for admin tasks:
+```sql
+-- Check admin configuration
+SELECT * FROM verify_admin_setup();
+
+-- Check pricing setup
+SELECT * FROM verify_pricing_setup();
+
+-- View all admin users
+SELECT * FROM user_status_summary WHERE user_type = 'admin';
+```
+
+### Security Considerations
+- Row Level Security (RLS) policies protect user data
+- Admin status is checked at database level
+- Admin privileges require elevated permissions
+- Usage records are protected by RLS policies
+
+### Troubleshooting Common Issues
+1. **User redirected to pricing despite admin status**
+   - Check subscription status in database
+   - Verify admin plan exists
+   - Ensure RLS policies are correct
+
+2. **Admin privileges not working**
+   - Verify user has admin subscription
+   - Check `is_admin` flag in subscriptions table
+   - Validate pricing plan configuration
+
+## Error Handling System
+
+The application implements a comprehensive error handling system with the following features:
+
+### 1. Standardized Error Components
+- `ErrorMessage` component provides consistent error UI across the application
+- Supports error codes, descriptive messages, and recovery suggestions
+- Includes optional action buttons for error recovery
+- Responsive design with proper contrast and accessibility
+
+### 2. Error Message Formatting
+```typescript
+// Example error with code
+{
+  error: "PGRST116: No rows returned",
+  suggestion: "The requested resource does not exist or has been deleted."
+}
+
+// Example network error
+{
+  error: "Network error",
+  suggestion: "Please check your internet connection and try again."
+}
+```
+
+### 3. Known Error Types
+The system includes pre-defined handling for common error scenarios:
+- Authentication errors (AUTH001)
+- Database constraints (23505, 23503)
+- Network connectivity issues
+- Timeout errors
+- Resource not found (PGRST116)
+- Database schema issues (42P01)
+
+### 4. Error Recovery
+Each error type includes:
+- Clear explanation of what went wrong
+- Specific suggestions for resolution
+- Action buttons where applicable (e.g., retry, refresh)
+- Automatic retry with exponential backoff for transient errors
+
+### 5. Development Tools
+```typescript
+// Enable test delays to verify loading states
+import { enableTestDelays } from '../utils/test-helpers';
+enableTestDelays();
+
+// Log loading state changes
+logLoadingState('ComponentName', true/false);
+```
+
+### 6. Implementation Example
+```typescript
+try {
+  // Your async operation
+} catch (err) {
+  const { error, suggestion } = getErrorMessage(err);
+  return (
+    <ErrorMessage 
+      error={error}
+      suggestion={suggestion}
+      action={{
+        label: 'Retry',
+        onClick: handleRetry
+      }}
+    />
+  );
+}
+```
+
+### 7. Best Practices
+- All errors include user-friendly messages
+- Technical details are logged but not shown to users
+- Consistent styling across the application
+- Recovery actions are clearly indicated
+- Loading states prevent premature error displays
+
+### 8. Error Monitoring
+- All errors are logged to console in development
+- Network errors are tracked separately
+- Authentication errors trigger automatic sign-out when needed
+- Error recovery attempts are logged for debugging

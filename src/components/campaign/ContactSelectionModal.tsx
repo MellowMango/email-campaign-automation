@@ -5,6 +5,7 @@ import { Input } from '../shadcn/Input';
 import { Checkbox } from '../shadcn/Checkbox';
 import { supabase } from '../../lib/supabase/client';
 import type { Contact, ContactList } from '../../types';
+import { LoadingState } from '../common/LoadingState';
 
 interface ContactSelectionModalProps {
   onClose: () => void;
@@ -203,9 +204,7 @@ export function ContactSelectionModal({ onClose, onSave, campaignId }: ContactSe
             </div>
 
             {loading ? (
-              <div className="text-center py-8 text-gray-400">
-                Loading contacts...
-              </div>
+              <LoadingState variant="spinner" size="sm" text="Loading contacts..." />
             ) : contacts.length === 0 ? (
               <div className="text-center py-8 text-gray-400">
                 No available contacts found

@@ -4,6 +4,7 @@ import { useNotifications } from '../../hooks/useNotifications';
 import { Card } from '../shadcn/Card';
 import { Button } from '../shadcn/Button';
 import type { Notification } from '../../types';
+import { LoadingState } from './LoadingState';
 
 export function NotificationsList() {
   const navigate = useNavigate();
@@ -43,11 +44,7 @@ export function NotificationsList() {
   };
 
   if (loading) {
-    return (
-      <div className="p-4 text-center text-gray-400">
-        Loading notifications...
-      </div>
-    );
+    return <LoadingState variant="spinner" size="sm" text="Loading notifications..." />;
   }
 
   if (error) {
