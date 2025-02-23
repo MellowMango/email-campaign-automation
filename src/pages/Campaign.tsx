@@ -11,15 +11,28 @@ import interactionPlugin from '@fullcalendar/interaction';
 import { ContactSelectionModal } from '../components/campaign/ContactSelectionModal';
 import { ContactListModal } from '../components/contacts/ContactListModal';
 import { SequenceGenerator } from '../components/campaign/sequence/SequenceGenerator';
+import { CampaignAnalytics } from '../components/campaign/CampaignAnalytics';
 
 // Helper functions for date formatting
+const roundToNearestFiveMinutes = (date: Date) => {
+  const minutes = date.getMinutes();
+  const roundedMinutes = Math.ceil(minutes / 5) * 5;
+  const newDate = new Date(date);
+  newDate.setMinutes(roundedMinutes);
+  newDate.setSeconds(0);
+  newDate.setMilliseconds(0);
+  return newDate;
+};
+
 const formatDateForInput = (dateStr: string) => {
   const date = new Date(dateStr);
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  const hours = String(date.getHours()).padStart(2, '0');
-  const minutes = String(date.getMinutes()).padStart(2, '0');
+  // Format to local timezone and round to nearest 5 minutes
+  const roundedDate = roundToNearestFiveMinutes(date);
+  const year = roundedDate.getFullYear();
+  const month = String(roundedDate.getMonth() + 1).padStart(2, '0');
+  const day = String(roundedDate.getDate()).padStart(2, '0');
+  const hours = String(roundedDate.getHours()).padStart(2, '0');
+  const minutes = String(roundedDate.getMinutes()).padStart(2, '0');
   return `${year}-${month}-${day}T${hours}:${minutes}`;
 };
 
@@ -27,10 +40,11 @@ const formatDateForDisplay = (dateStr: string) => {
   const date = new Date(dateStr);
   return date.toLocaleString(undefined, {
     year: 'numeric',
-    month: 'numeric',
+    month: 'short',
     day: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
+    hour12: true
   });
 };
 
@@ -268,20 +282,50 @@ export default function Campaign() {
     setError(null);
     setSuccessMessage(null);
     try {
-      const scheduledAt = newEmail.scheduled_at ? new Date(newEmail.scheduled_at).toISOString() : null;
-      const emailData = {
-        campaign_id: id,
-        subject: newEmail.subject,
-        content: newEmail.content,
-        scheduled_at: scheduledAt,
-        status: (scheduledAt ? 'pending' : 'draft') as Email['status']
-      };
+      let scheduledAt = null;
+      if (newEmail.scheduled_at) {
+        try {
+          const date = new Date(newEmail.scheduled_at);
+          if (!isNaN(date.getTime())) {
+            scheduledAt = date.toISOString();
+          }
+        } catch (dateError) {
+          throw new Error('Invalid date format. Please select a valid date and time.');
+        }
+      }
+
       if (newEmail.id) {
+        // For updates, first get the existing email to preserve metadata
+        const { data: existingEmail, error: fetchError } = await supabase
+          .from('emails')
+          .select('*')
+          .eq('id', newEmail.id)
+          .single();
+        
+        if (fetchError) throw fetchError;
+
+        const emailData = {
+          campaign_id: id,
+          subject: newEmail.subject,
+          content: newEmail.content,
+          scheduled_at: scheduledAt,
+          status: 'draft' as Email['status'], // Always set to draft initially
+          metadata: existingEmail.metadata // Preserve the existing metadata
+        };
+
         const { error } = await supabase.from('emails').update(emailData).eq('id', newEmail.id);
         if (error) throw error;
         setEmails(prev => prev.map(email => email.id === newEmail.id ? { ...email, ...emailData } : email));
         setSuccessMessage('Email updated successfully');
       } else {
+        const emailData = {
+          campaign_id: id,
+          subject: newEmail.subject,
+          content: newEmail.content,
+          scheduled_at: scheduledAt,
+          status: 'draft' as Email['status'] // Always set to draft initially
+        };
+        
         const { data, error } = await supabase.from('emails').insert([emailData]).select().single();
         if (error) throw error;
         if (data) setEmails(prev => [data as Email, ...prev]);
@@ -289,7 +333,27 @@ export default function Campaign() {
         setSuccessMessage('Email created successfully');
       }
     } catch (err) {
+      console.error('Save error:', err);
       setError(err instanceof Error ? err.message : 'Failed to save email');
+    }
+  };
+
+  const handleDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    try {
+      const inputDate = e.target.value;
+      if (!inputDate) {
+        setNewEmail(prev => ({ ...prev, scheduled_at: '' }));
+        return;
+      }
+      
+      // Convert input to local timezone and round to nearest 5 minutes
+      const date = roundToNearestFiveMinutes(new Date(inputDate));
+      if (!isNaN(date.getTime())) {
+        setNewEmail(prev => ({ ...prev, scheduled_at: date.toISOString() }));
+      }
+    } catch (error) {
+      console.error('Date parsing error:', error);
+      setError('Invalid date format. Please select a valid date and time.');
     }
   };
 
@@ -300,7 +364,43 @@ export default function Campaign() {
       content: email.content,
       scheduled_at: email.scheduled_at ? formatDateForInput(email.scheduled_at) : ''
     });
-    await handleGenerateContent(email);
+  };
+
+  const handleSetReadyToSend = async (emailId: string) => {
+    try {
+      // First check if we have contacts
+      if (contacts.length === 0) {
+        setError('Please add contacts to the campaign before setting emails ready to send');
+        return;
+      }
+
+      // Get the first contact's email as the recipient
+      const recipient = contacts[0].email;
+
+      // Update the email status to pending and include recipient
+      const { error: updateError } = await supabase
+        .from('emails')
+        .update({ 
+          status: 'pending',
+          updated_at: new Date().toISOString(),
+          to_email: recipient // Use to_email instead of recipient_email
+        })
+        .eq('id', emailId);
+
+      if (updateError) throw updateError;
+
+      // Update local state
+      setEmails(prev => prev.map(email => 
+        email.id === emailId 
+          ? { ...email, status: 'pending', to_email: recipient } 
+          : email
+      ));
+
+      setSuccessMessage('Email is now ready to send');
+    } catch (err) {
+      console.error('Error setting email ready:', err);
+      setError(err instanceof Error ? err.message : 'Failed to set email ready to send');
+    }
   };
 
   const handleGenerateContent = async (existingEmail?: Email) => {
@@ -883,12 +983,50 @@ Include the CTA link naturally within the content.`;
                   </div>
                   <div>
                     <label className="block text-sm font-medium mb-2">Schedule Send</label>
-                    <input type="datetime-local" value={newEmail.scheduled_at ? formatDateForInput(newEmail.scheduled_at) : ''}
-                      onChange={(e) => {
-                        const selectedDate = new Date(e.target.value);
-                        setNewEmail(prev => ({ ...prev, scheduled_at: selectedDate.toISOString() }));
-                      }}
-                      className="input w-full" />
+                    <div className="flex gap-4">
+                      <input
+                        type="date"
+                        value={newEmail.scheduled_at ? formatDateForInput(newEmail.scheduled_at).split('T')[0] : ''}
+                        onChange={(e) => {
+                          const currentTime = newEmail.scheduled_at 
+                            ? formatDateForInput(newEmail.scheduled_at).split('T')[1] 
+                            : formatDateForInput(new Date().toISOString()).split('T')[1];
+                          const newDate = `${e.target.value}T${currentTime}`;
+                          handleDateChange({ target: { value: newDate } } as any);
+                        }}
+                        min={formatDateForInput(new Date().toISOString()).split('T')[0]}
+                        className="input flex-1"
+                      />
+                      <select
+                        value={newEmail.scheduled_at ? formatDateForInput(newEmail.scheduled_at).split('T')[1] : ''}
+                        onChange={(e) => {
+                          const currentDate = newEmail.scheduled_at 
+                            ? formatDateForInput(newEmail.scheduled_at).split('T')[0] 
+                            : formatDateForInput(new Date().toISOString()).split('T')[0];
+                          const newDateTime = `${currentDate}T${e.target.value}`;
+                          handleDateChange({ target: { value: newDateTime } } as any);
+                        }}
+                        className="input flex-1"
+                      >
+                        {Array.from({ length: 24 * 12 }, (_, i) => {
+                          const hour = Math.floor(i / 12);
+                          const minute = (i % 12) * 5;
+                          const time = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+                          const period = hour < 12 ? 'AM' : 'PM';
+                          const displayHour = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
+                          return (
+                            <option key={time} value={time}>
+                              {`${displayHour}:${String(minute).padStart(2, '0')} ${period}`}
+                            </option>
+                          );
+                        })}
+                      </select>
+                    </div>
+                    {newEmail.scheduled_at && (
+                      <p className="text-sm text-gray-400 mt-1">
+                        Will send at {formatDateForDisplay(newEmail.scheduled_at)}
+                      </p>
+                    )}
                   </div>
                   <div className="flex space-x-4">
                     <Button type="button" variant="secondary"
@@ -939,6 +1077,20 @@ Include the CTA link naturally within the content.`;
                           <span className={`px-2 py-1 rounded text-sm ${getStatusBadgeClasses(email.status)}`}>
                             {email.status === 'ready' ? 'Ready to Send' : email.status.charAt(0).toUpperCase() + email.status.slice(1)}
                           </span>
+                          {email.status === 'draft' && (
+                            <button 
+                              onClick={(e) => { 
+                                e.stopPropagation(); 
+                                handleSetReadyToSend(email.id); 
+                              }}
+                              className="p-1 hover:bg-green-900/50 rounded transition-colors"
+                              title="Set ready to send"
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-green-400" viewBox="0 0 20 20" fill="currentColor">
+                                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                              </svg>
+                            </button>
+                          )}
                           <button onClick={(e) => { e.stopPropagation(); handleDeleteEmail(email.id); }}
                             className="p-1 hover:bg-red-900/50 rounded transition-colors" title="Delete email">
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
@@ -1098,52 +1250,7 @@ Include the CTA link naturally within the content.`;
 
         {activeTab === 'analytics' && (
           <div className="space-y-8 mb-8">
-            <Card className="p-4">
-              <h2 className="text-xl font-bold mb-4">Campaign Performance</h2>
-              <div className="h-64 bg-gray-800 rounded flex items-center justify-center">
-                <p className="text-gray-400">Analytics visualization coming soon</p>
-              </div>
-            </Card>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-              <Card className="p-4">
-                <h3 className="text-lg font-semibold mb-4">Engagement Metrics</h3>
-                <div className="space-y-4">
-                  <div className="flex justify-between items-center">
-                    <span>Open Rate</span>
-                    <span className="font-semibold">
-                      {campaign.analytics?.sent ? Math.round((campaign.analytics.opened / campaign.analytics.sent) * 100) : 0}%
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span>Click Rate</span>
-                    <span className="font-semibold">
-                      {campaign.analytics?.sent ? Math.round((campaign.analytics.clicked / campaign.analytics.sent) * 100) : 0}%
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span>Response Rate</span>
-                    <span className="font-semibold">
-                      {campaign.analytics?.sent ? Math.round((campaign.analytics.replied / campaign.analytics.sent) * 100) : 0}%
-                    </span>
-                  </div>
-                </div>
-              </Card>
-              <Card className="p-4">
-                <h3 className="text-lg font-semibold mb-4">Contact Status</h3>
-                <div className="space-y-4">
-                  {['new', 'contacted', 'responded', 'converted', 'unsubscribed'].map(status => {
-                    const count = contacts.filter(c => c.status === status).length;
-                    const percentage = contacts.length ? Math.round((count / contacts.length) * 100) : 0;
-                    return (
-                      <div key={status} className="flex justify-between items-center">
-                        <span>{status.charAt(0).toUpperCase() + status.slice(1)}</span>
-                        <span className="font-semibold">{count} ({percentage}%)</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </Card>
-            </div>
+            <CampaignAnalytics campaign={campaign} contacts={contacts} />
           </div>
         )}
 

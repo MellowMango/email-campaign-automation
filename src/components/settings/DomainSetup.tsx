@@ -4,6 +4,7 @@ import { Card } from '../shadcn/Card';
 import { emailService } from '../../lib/email/service';
 import { supabase } from '../../lib/supabase/client';
 import { useAuth } from '../../contexts/AuthContext';
+import { RefreshCw } from 'lucide-react';
 
 interface DomainSettings {
   id: string;
@@ -16,6 +17,7 @@ interface DomainSettings {
   }>;
   sender_email?: string;
   sender_verified?: boolean;
+  sendgrid_domain_id?: string;
 }
 
 export function DomainSetup() {
@@ -23,6 +25,7 @@ export function DomainSetup() {
   const [domain, setDomain] = useState('');
   const [senderEmail, setSenderEmail] = useState('');
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [domainSettings, setDomainSettings] = useState<DomainSettings | null>(null);
@@ -47,6 +50,66 @@ export function DomainSetup() {
       setDomainSettings(data);
     } catch (err) {
       console.error('Error fetching domain settings:', err);
+      setError('Failed to fetch domain settings');
+    }
+  };
+
+  const initializeEmailService = () => {
+    try {
+      const apiKey = import.meta.env.VITE_SENDGRID_API_KEY;
+      if (!apiKey) {
+        throw new Error('SendGrid API key not found in environment');
+      }
+      emailService.initialize(apiKey);
+      return true;
+    } catch (err) {
+      console.error('Failed to initialize email service:', err);
+      setError('Failed to initialize email service. Please check your configuration.');
+      return false;
+    }
+  };
+
+  const handleRefreshStatus = async () => {
+    if (!user || !domainSettings) return;
+    
+    setRefreshing(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      // Initialize email service first
+      if (!initializeEmailService()) {
+        return;
+      }
+
+      const provider = emailService.getProvider();
+      
+      // Check domain verification with SendGrid
+      const domainResult = await provider.verifyDomain(domainSettings.domain, user.id);
+      
+      // Handle "already exists" as success case
+      if (!domainResult.success && domainResult.error?.includes('Domain already exists')) {
+        setSuccess('Domain is already verified and active');
+      } else if (!domainResult.success) {
+        throw new Error(domainResult.error || 'Failed to verify domain status');
+      }
+
+      // If we have a sender email, verify it too
+      if (domainSettings.sender_email) {
+        const senderResult = await provider.verifySender(domainSettings.sender_email, user.id);
+        
+        if (!senderResult.success) {
+          throw new Error(senderResult.error || 'Failed to verify sender email status');
+        }
+      }
+
+      await fetchDomainSettings();
+    } catch (err) {
+      console.error('Refresh status error:', err);
+      const errorMessage = err instanceof Error ? err.message : 'Failed to refresh verification status';
+      setError(`Failed to refresh status: ${errorMessage}`);
+    } finally {
+      setRefreshing(false);
     }
   };
 
@@ -64,7 +127,11 @@ export function DomainSetup() {
     try {
       if (!user) throw new Error('User not authenticated');
 
-      // Initialize email service if not already initialized
+      // Initialize email service first
+      if (!initializeEmailService()) {
+        return;
+      }
+
       const provider = emailService.getProvider();
 
       // Verify domain
@@ -105,7 +172,11 @@ export function DomainSetup() {
     try {
       if (!user) throw new Error('User not authenticated');
 
-      // Initialize email service if not already initialized
+      // Initialize email service first
+      if (!initializeEmailService()) {
+        return;
+      }
+
       const provider = emailService.getProvider();
 
       // Verify sender email
@@ -130,7 +201,21 @@ export function DomainSetup() {
     <div className="space-y-4">
       <Card>
         <div className="p-4">
-          <h2 className="text-lg font-semibold mb-4">Domain Setup</h2>
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-lg font-semibold">Domain Setup</h2>
+            {domainSettings && (
+              <Button
+                onClick={handleRefreshStatus}
+                disabled={refreshing}
+                variant="outline"
+                size="sm"
+                className="flex items-center gap-2"
+              >
+                <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+                {refreshing ? 'Checking...' : 'Refresh Status'}
+              </Button>
+            )}
+          </div>
           
           {!domainSettings && (
             <form onSubmit={handleDomainSetup} className="space-y-4">
@@ -160,6 +245,12 @@ export function DomainSetup() {
                 <h3 className="text-md font-medium">Current Domain</h3>
                 <p className="text-sm text-gray-600">{domainSettings.domain}</p>
                 <p className="text-sm text-gray-600">Status: {domainSettings.status}</p>
+                {domainSettings.sender_email && (
+                  <>
+                    <p className="text-sm text-gray-600 mt-2">Sender Email: {domainSettings.sender_email}</p>
+                    <p className="text-sm text-gray-600">Sender Status: {domainSettings.sender_verified ? 'Verified' : 'Pending'}</p>
+                  </>
+                )}
               </div>
 
               {domainSettings.dns_records && (

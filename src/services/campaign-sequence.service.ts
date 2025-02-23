@@ -16,6 +16,63 @@ interface NotificationOptions {
   };
 }
 
+interface EmailMetadata {
+  sequence_type: Campaign['sequence_type'];
+  topic: {
+    name: string;
+    description: string;
+    stage: string;
+    previous_context?: Array<{
+      subject: string;
+      summary: string;
+      stage: string;
+    }>;
+    stage_metrics?: {
+      position: number;
+      successful_patterns: Array<{
+        subject_pattern: string;
+        content_summary: string;
+        engagement_metrics: Record<string, number>;
+      }>;
+    };
+  };
+}
+
+interface EmailContext {
+  subject: string;
+  summary: string;
+  stage: string;
+  engagement: Record<string, number>;
+  scheduled_at: string;
+  status: CampaignEmail['status'];
+}
+
+interface GenerationContextData {
+  recentEmails: EmailContext[];
+  stageEmails: EmailContext[];
+  successfulPatterns: Record<string, Array<{
+    subject_pattern: string;
+    content_summary: string;
+    engagement_metrics: Record<string, number>;
+  }>>;
+  campaignMetrics: Record<string, any>;
+  currentStageProgress: {
+    current: number;
+    total: number;
+    percentage: number;
+  };
+}
+
+interface CampaignEmail {
+  id: string;
+  campaign_id: string;
+  subject: string;
+  content: string;
+  scheduled_at: string;
+  status: 'draft' | 'pending' | 'ready' | 'sent' | 'failed';
+  metadata: EmailMetadata;
+}
+
 class CampaignSequenceService {
   private static instance: CampaignSequenceService;
   private readonly BATCH_SIZE = 5;
@@ -172,59 +229,288 @@ class CampaignSequenceService {
     daysInterval: number,
     stages: string[],
     totalEmails: number
-  ): Promise<Partial<Email>[]> {
-    const emailsToCreate: Partial<Email>[] = [];
-
-    for (let i = batchStart; i < batchEnd; i++) {
-      const emailDate = new Date(startDate);
-      emailDate.setDate(emailDate.getDate() + i * daysInterval);
-      const stageIndex = Math.floor((i / totalEmails) * stages.length);
-      const stage = stages[stageIndex];
-
-      const prompt = this.generatePrompt(campaign, i + 1, totalEmails, stage);
-
-      try {
-        const { subject, content } = await generateEmailContent(
-          prompt,
-          campaign.target_audience || 'N/A',
-          campaign.email_tone || 'professional',
-          campaign.company_name
-        );
-
-        emailsToCreate.push({
-          campaign_id: campaign.id,
-          subject,
-          content,
-          scheduled_at: emailDate.toISOString(),
-          status: 'draft',
-          metadata: {
-            sequence_type: campaign.sequence_type,
-            topic: {
-              name: subject,
-              description: content.substring(0, 100) + '...',
-              stage
-            }
-          }
-        });
-      } catch (error) {
-        console.error(`Failed to generate email ${i + 1}:`, error);
-        throw error;
-      }
+  ): Promise<Partial<CampaignEmail>[]> {
+    const emailsToCreate: Partial<CampaignEmail>[] = [];
+    
+    if (!supabaseAdmin) {
+      throw new Error('Service role client not available');
     }
 
-    return emailsToCreate;
+    try {
+      console.log('Fetching campaign context for ID:', campaign.id);
+      
+      // Fetch comprehensive campaign context
+      const { data: campaignData, error: contextError } = await supabaseAdmin
+        .from('campaigns')
+        .select(`
+          id,
+          name,
+          description,
+          target_audience,
+          goals,
+          value_proposition,
+          sequence_type,
+          cta_links,
+          analytics,
+          created_at,
+          updated_at,
+          user_id,
+          status,
+          duration,
+          emails_per_week,
+          email_tone,
+          campaign_type,
+          features
+        `)
+        .eq('id', campaign.id)
+        .single();
+
+      if (contextError) {
+        console.error('Campaign context fetch error:', contextError);
+        throw new Error(`Failed to fetch campaign context: ${contextError.message}`);
+      }
+
+      if (!campaignData) {
+        console.error('No campaign data found for ID:', campaign.id);
+        throw new Error('Campaign data not found');
+      }
+
+      console.log('Successfully fetched campaign data:', {
+        id: campaignData.id,
+        name: campaignData.name,
+        sequence_type: campaignData.sequence_type
+      });
+
+      // Cast to Campaign type with default values for potentially missing fields
+      const campaignContext: Campaign = {
+        ...campaignData,
+        campaign_type: campaignData.campaign_type || 'standard',
+        features: campaignData.features || []
+      };
+
+      // Verify essential fields are present and have values
+      if (!campaignContext.name) {
+        throw new Error('Campaign name is required');
+      }
+      if (!campaignContext.sequence_type) {
+        throw new Error('Sequence type is required');
+      }
+      if (!campaignContext.target_audience) {
+        throw new Error('Target audience is required');
+      }
+      if (!campaignContext.goals) {
+        throw new Error('Campaign goals are required');
+      }
+      if (!campaignContext.value_proposition) {
+        throw new Error('Value proposition is required');
+      }
+      if (!campaignContext.cta_links || Object.keys(campaignContext.cta_links).length === 0) {
+        throw new Error('CTA links are required');
+      }
+
+      // Fetch all previous emails for better context
+      const { data: previousEmails, error: emailsError } = await supabaseAdmin
+        .from('emails')
+        .select(`
+          id,
+          subject,
+          content,
+          metadata,
+          scheduled_at,
+          status,
+          analytics:email_events(
+            event_type,
+            created_at
+          )
+        `)
+        .eq('campaign_id', campaign.id)
+        .order('scheduled_at', { ascending: true });
+
+      if (emailsError) {
+        console.error('Failed to fetch previous emails:', emailsError);
+        throw new Error('Failed to fetch previous emails');
+      }
+
+      // Process email context with engagement metrics
+      const emailContext = (previousEmails || []).map(email => {
+        const engagement = email.analytics?.reduce((acc, event) => {
+          acc[event.event_type] = (acc[event.event_type] || 0) + 1;
+          return acc;
+        }, {} as Record<string, number>) || {};
+
+        return {
+          subject: email.subject,
+          summary: email.content.substring(0, 200) + '...',
+          stage: email.metadata?.topic?.stage,
+          engagement,
+          scheduled_at: email.scheduled_at,
+          status: email.status
+        };
+      });
+
+      // Get successful content patterns
+      const successfulPatterns = this.analyzeSuccessfulPatterns(emailContext);
+
+      for (let i = batchStart; i < batchEnd; i++) {
+        const emailDate = new Date(startDate);
+        emailDate.setDate(emailDate.getDate() + i * daysInterval);
+        const stageIndex = Math.floor((i / totalEmails) * stages.length);
+        const stage = stages[stageIndex];
+
+        // Get enhanced context for generation
+        const contextData: GenerationContextData = {
+          recentEmails: emailContext.slice(-2),
+          stageEmails: emailContext.filter(e => e.stage === stage),
+          successfulPatterns,
+          campaignMetrics: campaignContext.analytics || {},
+          currentStageProgress: this.calculateStageProgress(i, totalEmails, stage, stages)
+        };
+
+        const prompt = this.generatePrompt(
+          campaignContext,
+          i + 1,
+          totalEmails,
+          stage,
+          contextData
+        );
+
+        try {
+          const { subject, content } = await generateEmailContent(
+            prompt,
+            campaignContext.target_audience || 'N/A',
+            campaignContext.email_tone || 'professional',
+            campaign.company_name
+          );
+
+          const newEmail: Partial<CampaignEmail> = {
+            campaign_id: campaign.id,
+            subject,
+            content,
+            scheduled_at: emailDate.toISOString(),
+            status: 'draft' as const,
+            metadata: {
+              sequence_type: campaign.sequence_type,
+              topic: {
+                name: subject,
+                description: content.substring(0, 100) + '...',
+                stage,
+                previous_context: contextData.recentEmails,
+                stage_metrics: {
+                  position: contextData.currentStageProgress.percentage,
+                  successful_patterns: successfulPatterns[stage] || []
+                }
+              }
+            }
+          };
+
+          emailsToCreate.push(newEmail);
+          
+          // Update context for next generation
+          if (newEmail.content && newEmail.metadata?.topic) {
+            emailContext.push({
+              subject: newEmail.subject || '',
+              summary: newEmail.content.substring(0, 200) + '...',
+              stage: newEmail.metadata.topic.stage,
+              engagement: {},
+              scheduled_at: newEmail.scheduled_at || '',
+              status: newEmail.status || 'draft'
+            });
+          }
+        } catch (error) {
+          console.error(`Failed to generate email ${i + 1}:`, error);
+          throw error;
+        }
+      }
+
+      return emailsToCreate;
+    } catch (error) {
+      console.error('Error in generateBatch:', error);
+      throw error;
+    }
+  }
+
+  private analyzeSuccessfulPatterns(emailContext: Array<any>): Record<string, any[]> {
+    const patterns: Record<string, any[]> = {};
+    
+    emailContext.forEach(email => {
+      const { stage, engagement, subject, summary } = email;
+      if (!stage) return;
+
+      // Consider an email successful if it has above-average engagement
+      const isSuccessful = engagement.opened > 0.2 || engagement.clicked > 0.1;
+      
+      if (isSuccessful) {
+        if (!patterns[stage]) patterns[stage] = [];
+        patterns[stage].push({
+          subject_pattern: this.extractPattern(subject),
+          content_summary: summary,
+          engagement_metrics: engagement
+        });
+      }
+    });
+
+    return patterns;
+  }
+
+  private extractPattern(subject: string): string {
+    // Extract key patterns from successful subject lines
+    return subject
+      .replace(/[0-9]+/g, '#')
+      .replace(/[A-Za-z]+/g, (word) => 
+        word.length > 3 ? '[word]' : word
+      );
+  }
+
+  private calculateStageProgress(
+    emailNumber: number,
+    totalEmails: number,
+    currentStage: string,
+    stages: string[]
+  ): { current: number; total: number; percentage: number } {
+    const emailsPerStage = Math.ceil(totalEmails / stages.length);
+    const stageIndex = stages.indexOf(currentStage);
+    const stageStart = stageIndex * emailsPerStage;
+    const stagePosition = emailNumber - stageStart;
+
+    return {
+      current: stagePosition + 1,
+      total: emailsPerStage,
+      percentage: Math.round((stagePosition / emailsPerStage) * 100)
+    };
   }
 
   private generatePrompt(
     campaign: Campaign,
     emailNumber: number,
     totalEmails: number,
-    stage: string
+    stage: string,
+    contextData: GenerationContextData
   ): string {
     const progress = (emailNumber / totalEmails) * 100;
     const isFirstEmail = emailNumber === 1;
     const isLastEmail = emailNumber === totalEmails;
     const stageTransition = this.isStageTransition(emailNumber, totalEmails, stage);
+
+    const previousEmailsContext = contextData.recentEmails.map((email: EmailContext, index: number) => 
+      `Previous Email ${index + 1}:
+       Subject: ${email.subject}
+       Stage: ${email.stage}
+       Summary: ${email.summary}
+       Engagement: ${Object.entries(email.engagement)
+         .map(([type, count]) => `${type}: ${count}`)
+         .join(', ')}`
+    ).join('\n\n');
+
+    const successfulPatternsContext = contextData.successfulPatterns[stage]?.map((pattern, index) => 
+      `Pattern ${index + 1}:
+       Subject Pattern: ${pattern.subject_pattern}
+       Content Theme: ${pattern.content_summary}
+       Engagement: ${Object.entries(pattern.engagement_metrics)
+         .map(([type, count]) => `${type}: ${count}`)
+         .join(', ')}`
+    ).join('\n\n') || 'No successful patterns yet for this stage';
+
+    const stageProgress = contextData.currentStageProgress;
 
     return `Generate content for email ${emailNumber} of ${totalEmails} in the ${campaign.sequence_type} sequence:
 Campaign Name: ${campaign.name}
@@ -233,25 +519,51 @@ Target Audience: ${campaign.target_audience || 'N/A'}
 Goals: ${campaign.goals || 'N/A'}
 Value Proposition: ${campaign.value_proposition || 'N/A'}
 Current Stage: ${stage}
-Sequence Progress: ${Math.round(progress)}%
+Stage Progress: ${stageProgress.current} of ${stageProgress.total} (${stageProgress.percentage}%)
+Overall Progress: ${Math.round(progress)}%
 CTA Link: ${campaign.cta_links[campaign.sequence_type]}
 
-Context:
+Previous Context:
+${previousEmailsContext || 'No previous emails in sequence'}
+
+Successful Patterns:
+${successfulPatternsContext}
+
+Email Position Context:
 ${isFirstEmail ? '- This is the first email in the sequence. Introduce the core concept and set expectations.' : ''}
 ${isLastEmail ? '- This is the final email. Create a strong conclusion and clear call to action.' : ''}
 ${stageTransition ? '- This email transitions to a new stage. Bridge the previous content with the new focus.' : ''}
 - Current stage (${stage}) focuses on: ${this.getStageDescription(campaign.sequence_type, stage)}
 
-Requirements:
+Narrative Requirements:
 1. Create a subject line and content that:
+   - Builds directly on the themes/topics from previous emails
+   - Maintains consistent messaging while advancing the narrative
+   - Uses natural transitions from previous content
    - Aligns with the current stage (${stage})
-   - Builds on previous stages' momentum
-   - Maintains narrative continuity
-2. Focus on the target audience's specific needs and pain points
-3. Progress naturally towards the campaign goals
-4. Maintain a ${campaign.email_tone || 'professional'} tone
-5. Include the CTA naturally and contextually
-6. Keep the message focused and actionable`;
+   - Incorporates successful patterns from similar emails
+2. Ensure Content Flow:
+   - Reference relevant points from previous emails
+   - Develop ideas progressively
+   - Maintain narrative continuity
+   - Use proven engagement patterns
+3. Audience Engagement:
+   - Address target audience's specific needs and pain points
+   - Progress naturally towards campaign goals
+   - Maintain ${campaign.email_tone || 'professional'} tone
+   - Focus on elements that drove previous engagement
+4. Call to Action:
+   - Build on previous value propositions
+   - Include CTA contextually
+   - Create natural progression to next stage
+5. Keep the message focused and actionable while connecting to the broader sequence narrative
+
+Format Requirements:
+1. Subject Line: Clear, compelling, and aligned with successful patterns
+2. Opening: Strong hook that builds on previous context
+3. Body: Well-structured paragraphs with clear value propositions
+4. CTA: Natural placement within the narrative
+5. Closing: Professional signature with complete contact information`;
   }
 
   private isStageTransition(emailNumber: number, totalEmails: number, currentStage: string): boolean {
@@ -298,7 +610,7 @@ Requirements:
     return stages[sequenceType] || stages.awareness;
   }
 
-  private async logAIGeneration(campaignId: string, emails: Partial<Email>[]): Promise<void> {
+  private async logAIGeneration(campaignId: string, emails: Partial<CampaignEmail>[]): Promise<void> {
     try {
       const { error: logError } = await supabase
         .from('ai_logs')

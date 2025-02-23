@@ -1,0 +1,2 @@
+-- UNDO: Drop this migration entirely
+-- This file intentionally left empty to prevent any changes to the cron job 

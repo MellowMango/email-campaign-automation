@@ -18,32 +18,26 @@ class EmailService {
     return EmailService.instance;
   }
 
-  initialize(type: EmailProviderType, config: { apiKey?: string } = {}): void {
-    if (this.provider && this.providerType === type) {
-      return; // Already initialized with the same provider
+  initialize(apiKey: string): void {
+    if (!this.provider) {
+      this.provider = new SendGridProvider(apiKey);
     }
-
-    switch (type) {
-      case 'sendgrid':
-        if (!config.apiKey) {
-          throw new Error('SendGrid API key is required');
-        }
-        this.provider = new SendGridProvider(config.apiKey);
-        break;
-      case 'mock':
-        this.provider = new MockEmailProvider();
-        break;
-      default:
-        throw new Error(`Unsupported email provider type: ${type}`);
-    }
-
-    this.providerType = type;
   }
 
   getProvider(): EmailProvider {
     if (!this.provider) {
-      throw new Error('Email provider not initialized. Call initialize() first.');
+      // Try to initialize with environment variable
+      const apiKey = import.meta.env.VITE_SENDGRID_API_KEY;
+      if (!apiKey) {
+        throw new Error('Email provider not initialized and no API key available');
+      }
+      this.initialize(apiKey);
     }
+
+    if (!this.provider) {
+      throw new Error('Failed to initialize email provider');
+    }
+
     return this.provider;
   }
 }

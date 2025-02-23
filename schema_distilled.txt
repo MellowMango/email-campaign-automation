@@ -1,127 +1,90 @@
-Below is a distilled, high‐level outline of the overall schema structure as extracted from the dump. (Note that many details such as indexes, privileges, and default privileges have been omitted for clarity.)
+Below is an overview that “distills” your Supabase schema into its main components and how they work together:
 
-Schema: _realtime
-	•	Tables:
-	•	extensions: Contains metadata/settings for realtime extensions.
-	•	schema_migrations: Stores migration versions for the realtime layer.
-	•	tenants: Holds tenant configuration and limits (e.g. max events, JWT settings).
+1. Extensions & Setup
+	•	Extensions Installed:
+Your database makes heavy use of extensions to add functionality. These include:
+	•	pg_cron: For scheduling tasks.
+	•	pg_net, pgsodium, pg_graphql, pg_stat_statements: For network functions, encryption, GraphQL support, and performance statistics.
+	•	pg_trgm, pgcrypto, pgjwt: For text search enhancements, cryptographic functions, and JWT support.
+	•	supabase_vault, uuid-ossp: For secure storage and UUID generation.
+	•	Custom Data Types:
+A composite type (http_response) is defined to structure HTTP response data (status, content, headers).
 
-Schema: auth
-	•	Tables:
-	•	audit_log_entries: Audit trail for user actions.
-	•	flow_state: Stores metadata for PKCE logins.
-	•	identities: Maps external identity provider data to internal users.
-	•	instances: Manages multi-site user configurations.
-	•	mfa_amr_claims: Stores multi‐factor authentication method claims.
-	•	mfa_challenges: Records challenge requests for MFA.
-	•	mfa_factors: Holds metadata for MFA factors (e.g. totp, webauthn, phone).
-	•	one_time_tokens: Tokens for actions such as confirmations, recovery, etc.
-	•	refresh_tokens: Tokens used to refresh JWTs.
-	•	saml_providers: Configurations for SAML identity provider connections.
-	•	saml_relay_states: Contains relay state information for SAML logins.
-	•	schema_migrations: Tracks updates to the auth system.
-	•	sessions: Stores active session data.
-	•	sso_domains: Maps SSO domains to providers.
-	•	sso_providers: Additional SSO provider information.
-	•	users: The core table for user login data.
-	•	Functions:
-	•	email(), jwt(), role(), uid(): (Legacy and current functions for extracting JWT claims.)
-	•	Row-Level Security & Policies:
-	•	Various RLS policies and triggers (e.g. on_auth_user_created) ensure that users can only view and modify their own records.
+2. Core Domain Functions
 
-Schema: extensions
-	•	Functions:
-	•	A suite of cryptographic and utility functions such as:
-	•	algorithm_sign, armor, dearmor
-	•	crypt, decrypt, decrypt_iv
-	•	digest, encrypt, encrypt_iv
-	•	gen_random_bytes, gen_random_uuid, gen_salt
-	•	hmac, uuid_generate_* functions, verify, etc.
-	•	Functions to grant access to other extensions/features (e.g. grant_pg_cron_access, grant_pg_graphql_access, grant_pg_net_access).
-	•	Event Triggers:
-	•	Triggers such as issue_pg_cron_access and issue_pg_graphql_access run after DDL changes.
-	•	Tables:
-	•	Extension objects like pg_stat_statements (for tracking SQL performance).
+Your schema defines many stored procedures and functions that encapsulate business logic. Examples include:
+	•	Billing & Usage:
+	•	calculate_usage_billing: Computes billing details based on usage (e.g., email counts versus plan limits).
+	•	invoke_billing_calculation: Wraps the daily billing run.
+	•	Usage tracking functions (record_email_usage, record_contact_usage, and record_campaign_usage) capture how many emails, contacts, and campaigns are processed.
+	•	Campaign & Contact Management:
+	•	create_admin_subscription: Ensures an “admin” subscription is set up for a given user.
+	•	contacts_search_vector_trigger: Updates a full‐text search vector on contacts (indexing email, first/last names, company).
+	•	Utility Functions:
+	•	get_pending_emails gathers emails scheduled for sending.
+	•	get_setting retrieves configuration settings.
+	•	Several functions update timestamps, analytics, and engagement scores.
 
-Schema: graphql / graphql_public
-	•	graphql_public:
-	•	Functions:
-	•	A public wrapper function (graphql()) that exposes GraphQL queries.
-	•	(The “graphql” schema itself is likely used for internal GraphQL support.)
+3. Tables & Views
 
-Schema: net
-	•	Functions:
-	•	http_get and http_post: Asynchronous HTTP functions for external calls.
+The database is built around several key tables and a few views:
+	•	Campaign & Email Management:
+	•	campaigns: Holds campaign metadata (user, name, description, status, analytics JSON, and configuration fields such as email tone and sequence type).
+	•	emails: Stores individual email records with scheduling, status, and metadata (including delivery metrics and custom fields).
+	•	email_events & email_errors: Log events (opens, clicks, bounces, etc.) and errors related to email sending.
+	•	Contacts & Lists:
+	•	contacts: Contains contact details along with a generated full‐text search vector.
+	•	contact_lists and contact_list_members: Manage groupings of contacts and their membership relationships.
+	•	Subscription & Billing:
+	•	subscriptions: Stores subscription records (linking users to pricing plans with Stripe IDs, billing periods, and admin flags).
+	•	pricing_plans: Describes available plans (including limits and features in JSON).
+	•	invoices: Records billing invoices.
+	•	usage_records and usage_billing: Track usage events and overages for billing purposes.
+	•	User & Profile Management:
+	•	profiles: Keeps additional user information (full name, company, avatar, etc.) in tandem with the authentication data.
+	•	app_settings: General configuration settings for the application.
+	•	Logging & Notifications:
+	•	ai_logs, function_logs, logs: Capture various operational and error logs.
+	•	notifications & error_notifications: Provide messaging to users about events or errors.
+	•	Rate Limiting:
+	•	rate_limit_logs and rate_limits: Monitor and control API usage.
+	•	Views (rate_limit_monitoring, rate_limit_status): Offer summarized views of a user’s rate-limit status.
+	•	Views for Aggregation:
+	•	user_status_summary: Joins user, subscription, and pricing data to provide an at-a-glance summary of a user’s account state.
+	•	error_monitoring: Aggregates error events along with retry queue data for monitoring purposes.
+	•	Backup & Domain Configuration:
+	•	data_migration_backup_20240327: Appears to serve as a backup table.
+	•	domain_settings: Manages custom domain configuration and DNS settings for email sending.
 
-Schema: pgbouncer
-	•	Functions:
-	•	get_auth: A function used by PgBouncer for authentication.
+4. Indexes, Relationships & Constraints
+	•	Indexes:
+Numerous indexes (including GIN indexes on full‐text search vectors and standard btree indexes on foreign keys and status columns) are set up to optimize query performance.
+	•	Foreign Keys & Relationships:
+The schema is interconnected:
+	•	Campaigns link to users (and profiles).
+	•	Emails, contacts, and usage records reference campaigns and subscriptions.
+	•	Billing tables reference subscriptions and users.
+	•	Many-to-many relationships exist between contacts and lists.
+	•	Constraints & Checks:
+There are multiple CHECK constraints enforcing valid values (for statuses, sequence types, email tone, etc.) and UNIQUE constraints (on fields like Stripe IDs).
 
-Schema: pgsodium
-	•	Functions:
-	•	crypto_aead_det_decrypt, crypto_aead_det_encrypt, crypto_aead_det_keygen: For modern cryptography operations.
-	•	Tables:
-	•	(Supporting tables such as decrypted_key, masking_rule, and mask_columns may be present for key management and masking.)
-
-Schema: realtime
-	•	Tables:
-	•	messages: Stores realtime messages for broadcast (partitioned by insertion timestamp).
-	•	schema_migrations: Realtime-specific migration tracking.
-	•	subscription: Manages realtime subscription configurations including filters and claims.
-	•	Functions:
-	•	apply_rls: Applies row-level security checks on change data.
-	•	broadcast_changes: Packages and sends change notifications.
-	•	build_prepared_statement_sql: Constructs SQL for testing visibility of changes.
-	•	"cast": Casts values safely for change processing.
-	•	check_equality_op: Evaluates user-defined filter operators.
-	•	is_visible_through_filters: Determines whether a record is visible given subscription filters.
-	•	list_changes: Retrieves changes (using logical decoding).
-	•	quote_wal2json: Prepares entity names for WAL-to-JSON conversion.
-	•	send: Enqueues a message for broadcast.
-	•	subscription_check_filters: Validates filters when a subscription is created or updated.
-	•	to_regrole: Converts role names to PostgreSQL role types.
-	•	topic: Retrieves the current realtime topic.
-	•	Event Triggers:
-	•	pgrst_ddl_watch and pgrst_drop_watch: Monitor DDL changes to reload schema as needed.
-	•	Additional event triggers (e.g. issue_graphql_placeholder) support dynamic behavior after certain DDL events.
-
-Schema: storage
-	•	Tables:
-	•	buckets: Definitions for storage buckets.
-	•	migrations: Tracks schema migrations for storage.
-	•	objects: Stores file objects and metadata (with generated path tokens).
-	•	s3_multipart_uploads: Tracks multipart upload sessions.
-	•	s3_multipart_uploads_parts: Stores parts for multipart uploads.
-	•	Functions:
-	•	can_insert_object: Checks whether an object can be inserted into storage.
-	•	extension, filename, foldername: Utility functions for parsing object names.
-	•	get_size_by_bucket: Aggregates storage size per bucket.
-	•	list_multipart_uploads_with_delimiter and list_objects_with_delimiter: Functions to support S3-like listing operations.
-	•	operation: Retrieves the current storage operation context.
-	•	search: Supports searching and paginating objects.
-	•	update_updated_at_column: A trigger function to update the updated_at timestamp.
+5. Triggers & Row-Level Security
 	•	Triggers:
-	•	Trigger on objects to update timestamps on change.
+	•	Automatically update search vectors on contact insert/update.
+	•	Update “updated_at” timestamps on changes.
+	•	Track usage events (for campaigns, contacts, and emails) immediately after new rows are inserted.
+	•	Security & Policies:
+	•	Row Level Security (RLS) is enabled on nearly every table.
+	•	A comprehensive set of policies governs what authenticated, anonymous, and service roles can read, insert, update, or delete.
+	•	Default privileges and grants are set to ensure that roles like “service_role,” “authenticated,” and “anon” have the appropriate access to tables, functions, and sequences.
 
-Schema: supabase_functions
-	•	Tables:
-	•	hooks: Audit trail of function hook invocations.
-	•	migrations: Tracks schema changes for Supabase functions.
-	•	Functions:
-	•	http_request: A trigger function to perform HTTP calls (using net.http_get/ http_post) and log the request.
+6. Overall Architecture & Purpose
 
-Schema: supabase_migrations
-	•	Tables:
-	•	schema_migrations: Used for managing Supabase-specific migrations.
+The schema supports a SaaS platform that appears to focus on:
+	•	Email Campaign Management: Creating, scheduling, sending, and tracking email campaigns.
+	•	User Subscriptions & Billing: Integrating subscription plans (with admin and base plans), usage tracking, and invoicing.
+	•	Contact & List Management: Handling contacts with robust search capabilities and segmented lists.
+	•	Operational Logging & Rate Limiting: Detailed logging, error monitoring, and rate limit management to support system reliability.
+	•	Extensibility & Security: The use of extensions, custom functions, and detailed security policies makes the schema both flexible and secure.
 
-Schema: vault
-	•	Views:
-	•	decrypted_secrets: A view that decrypts stored secrets using functions from pgsodium.
-	•	Triggers:
-	•	A trigger (e.g. secrets_encrypt_secret_secret) automatically encrypts secrets before storage.
-
-Additional Notes:
-	•	Row-Level Security: Most tables (especially in auth, realtime, and storage) have RLS enabled along with defined policies to control which roles (such as anon, authenticated, service_role, and dashboard_user) can perform specific operations.
-	•	Default Privileges: The dump sets up default privileges for roles across schemas so that functions, tables, and sequences have appropriate access.
-
-This outline represents a “consolidated schema structure” showing the main schemas and the types of objects they contain, which should provide a distilled context of the overall database design.
+This distilled overview should help you see how the different parts of your Supabase database fit together—from the core business logic (campaigns, emails, subscriptions) to the infrastructure (extensions, triggers, and security policies).

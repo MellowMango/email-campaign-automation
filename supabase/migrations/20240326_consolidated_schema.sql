@@ -173,6 +173,7 @@ CREATE TABLE IF NOT EXISTS public.emails (
     scheduled_at TIMESTAMPTZ,
     sent_at TIMESTAMPTZ,
     status TEXT CHECK (status IN ('pending', 'sent', 'failed')) DEFAULT 'pending',
+    error_message TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
