@@ -38,6 +38,28 @@ class CampaignSequenceService {
     const storageKey = this.STORAGE_KEY_PREFIX + campaign.id;
     
     try {
+      // Verify campaign ownership using service role client
+      if (!supabaseAdmin) {
+        throw new Error('Service role client not available');
+      }
+
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
+
+      const { data: campaignData, error: campaignError } = await supabaseAdmin
+        .from('campaigns')
+        .select('id, user_id')
+        .eq('id', campaign.id)
+        .single();
+
+      if (campaignError || !campaignData) {
+        throw new Error('Campaign not found');
+      }
+
+      if (campaignData.user_id !== user.id) {
+        throw new Error('Access denied');
+      }
+
       // Store generation status
       localStorage.setItem(storageKey, JSON.stringify({ status: 'generating' }));
       
@@ -67,8 +89,8 @@ class CampaignSequenceService {
           totalEmails
         );
 
-        // Insert batch of emails
-        const { error: insertError } = await supabase
+        // Insert batch of emails using service role client
+        const { error: insertError } = await supabaseAdmin
           .from('emails')
           .insert(emailsToCreate);
 
@@ -199,6 +221,11 @@ class CampaignSequenceService {
     totalEmails: number,
     stage: string
   ): string {
+    const progress = (emailNumber / totalEmails) * 100;
+    const isFirstEmail = emailNumber === 1;
+    const isLastEmail = emailNumber === totalEmails;
+    const stageTransition = this.isStageTransition(emailNumber, totalEmails, stage);
+
     return `Generate content for email ${emailNumber} of ${totalEmails} in the ${campaign.sequence_type} sequence:
 Campaign Name: ${campaign.name}
 Description: ${campaign.description || 'N/A'}
@@ -206,14 +233,59 @@ Target Audience: ${campaign.target_audience || 'N/A'}
 Goals: ${campaign.goals || 'N/A'}
 Value Proposition: ${campaign.value_proposition || 'N/A'}
 Current Stage: ${stage}
+Sequence Progress: ${Math.round(progress)}%
 CTA Link: ${campaign.cta_links[campaign.sequence_type]}
 
+Context:
+${isFirstEmail ? '- This is the first email in the sequence. Introduce the core concept and set expectations.' : ''}
+${isLastEmail ? '- This is the final email. Create a strong conclusion and clear call to action.' : ''}
+${stageTransition ? '- This email transitions to a new stage. Bridge the previous content with the new focus.' : ''}
+- Current stage (${stage}) focuses on: ${this.getStageDescription(campaign.sequence_type, stage)}
+
 Requirements:
-1. Create a subject line and content that aligns with the current stage (${stage})
-2. Focus on the target audience's needs
-3. Build progressively towards the campaign goals
+1. Create a subject line and content that:
+   - Aligns with the current stage (${stage})
+   - Builds on previous stages' momentum
+   - Maintains narrative continuity
+2. Focus on the target audience's specific needs and pain points
+3. Progress naturally towards the campaign goals
 4. Maintain a ${campaign.email_tone || 'professional'} tone
-5. Include the CTA naturally`;
+5. Include the CTA naturally and contextually
+6. Keep the message focused and actionable`;
+  }
+
+  private isStageTransition(emailNumber: number, totalEmails: number, currentStage: string): boolean {
+    const stages = this.getSequenceStages('awareness'); // Default to awareness stages if type not available
+    const emailsPerStage = Math.ceil(totalEmails / stages.length);
+    return emailNumber % emailsPerStage === 1 && emailNumber !== 1;
+  }
+
+  private getStageDescription(sequenceType: Campaign['sequence_type'], stage: string): string {
+    const descriptions: Record<string, Record<string, string>> = {
+      awareness: {
+        'Problem Awareness': 'Identifying and empathizing with the audience\'s challenges',
+        'Solution Education': 'Introducing potential solutions to their problems',
+        'Brand Introduction': 'Presenting our unique approach and capabilities',
+        'Value Proposition': 'Demonstrating the specific benefits we offer',
+        'Social Proof': 'Sharing success stories and testimonials'
+      },
+      conversion: {
+        'Value Proposition': 'Highlighting our unique value and benefits',
+        'Feature Showcase': 'Detailing key features and their practical applications',
+        'Case Studies': 'Presenting real-world success stories',
+        'Offer Introduction': 'Presenting our specific offer and its value',
+        'Call to Action': 'Creating urgency and encouraging decision-making'
+      },
+      nurture: {
+        'Industry Insights': 'Sharing valuable industry knowledge and trends',
+        'Best Practices': 'Providing actionable best practices and strategies',
+        'Tips & Tricks': 'Offering practical advice and implementation tips',
+        'Success Stories': 'Showcasing successful implementations and results',
+        'Thought Leadership': 'Presenting innovative ideas and future perspectives'
+      }
+    };
+
+    return descriptions[sequenceType]?.[stage] || 'Moving the audience through the sequence journey';
   }
 
   private getSequenceStages(sequenceType: Campaign['sequence_type']): string[] {

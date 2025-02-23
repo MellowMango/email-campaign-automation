@@ -180,73 +180,57 @@ CREATE TABLE IF NOT EXISTS public.emails (
 -- Enable RLS for emails
 ALTER TABLE public.emails ENABLE ROW LEVEL SECURITY;
 
+-- Drop existing policies if they exist
+DROP POLICY IF EXISTS "Users can view emails from own campaigns" ON public.emails;
+DROP POLICY IF EXISTS "Users can insert emails for own campaigns" ON public.emails;
+DROP POLICY IF EXISTS "Users can update emails from own campaigns" ON public.emails;
+DROP POLICY IF EXISTS "Users can delete emails from own campaigns" ON public.emails;
+
 -- Create policies for emails
-DO $$ 
-BEGIN
-    IF NOT EXISTS (
-        SELECT FROM pg_policies 
-        WHERE tablename = 'emails' 
-        AND policyname = 'Users can view emails from own campaigns'
-    ) THEN
-        CREATE POLICY "Users can view emails from own campaigns"
-            ON public.emails FOR SELECT
-            USING (
-                EXISTS (
-                    SELECT 1 FROM public.campaigns
-                    WHERE campaigns.id = emails.campaign_id
-                    AND campaigns.user_id = auth.uid()
-                )
-            );
-    END IF;
+CREATE POLICY "Service role can insert emails"
+    ON public.emails FOR INSERT
+    TO service_role
+    WITH CHECK (true);
 
-    IF NOT EXISTS (
-        SELECT FROM pg_policies 
-        WHERE tablename = 'emails' 
-        AND policyname = 'Users can insert emails for own campaigns'
-    ) THEN
-        CREATE POLICY "Users can insert emails for own campaigns"
-            ON public.emails FOR INSERT
-            WITH CHECK (
-                EXISTS (
-                    SELECT 1 FROM public.campaigns
-                    WHERE campaigns.id = emails.campaign_id
-                    AND campaigns.user_id = auth.uid()
-                )
-            );
-    END IF;
+CREATE POLICY "Users can view emails from own campaigns"
+    ON public.emails FOR SELECT
+    USING (
+        EXISTS (
+            SELECT 1 FROM public.campaigns
+            WHERE campaigns.id = emails.campaign_id
+            AND campaigns.user_id = auth.uid()
+        )
+    );
 
-    IF NOT EXISTS (
-        SELECT FROM pg_policies 
-        WHERE tablename = 'emails' 
-        AND policyname = 'Users can update emails from own campaigns'
-    ) THEN
-        CREATE POLICY "Users can update emails from own campaigns"
-            ON public.emails FOR UPDATE
-            USING (
-                EXISTS (
-                    SELECT 1 FROM public.campaigns
-                    WHERE campaigns.id = emails.campaign_id
-                    AND campaigns.user_id = auth.uid()
-                )
-            );
-    END IF;
+CREATE POLICY "Users can insert emails for own campaigns"
+    ON public.emails FOR INSERT
+    WITH CHECK (
+        EXISTS (
+            SELECT 1 FROM public.campaigns
+            WHERE campaigns.id = campaign_id
+            AND campaigns.user_id = auth.uid()
+        )
+    );
 
-    IF NOT EXISTS (
-        SELECT FROM pg_policies 
-        WHERE tablename = 'emails' 
-        AND policyname = 'Users can delete emails from own campaigns'
-    ) THEN
-        CREATE POLICY "Users can delete emails from own campaigns"
-            ON public.emails FOR DELETE
-            USING (
-                EXISTS (
-                    SELECT 1 FROM public.campaigns
-                    WHERE campaigns.id = emails.campaign_id
-                    AND campaigns.user_id = auth.uid()
-                )
-            );
-    END IF;
-END $$;
+CREATE POLICY "Users can update emails from own campaigns"
+    ON public.emails FOR UPDATE
+    USING (
+        EXISTS (
+            SELECT 1 FROM public.campaigns
+            WHERE campaigns.id = emails.campaign_id
+            AND campaigns.user_id = auth.uid()
+        )
+    );
+
+CREATE POLICY "Users can delete emails from own campaigns"
+    ON public.emails FOR DELETE
+    USING (
+        EXISTS (
+            SELECT 1 FROM public.campaigns
+            WHERE campaigns.id = emails.campaign_id
+            AND campaigns.user_id = auth.uid()
+        )
+    );
 
 -- Create ai_logs table
 CREATE TABLE IF NOT EXISTS public.ai_logs (

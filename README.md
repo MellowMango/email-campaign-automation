@@ -3,412 +3,237 @@
 ## Project Overview
 MailVanta is an AI-powered outreach solution built with React, TypeScript, and Supabase. The application provides campaign management, contact management, and automated email sequences with AI-driven content generation.
 
+## Recent Implementation Success: Email Sequence Generation
+The email sequence generation system is now working successfully with the following components:
+
+### Core Components
+- **Service Role Integration**: Using `supabaseAdmin` for secure email insertions
+- **Campaign Ownership Verification**: Pre-generation checks ensure user owns the campaign
+- **Notification System**: Real-time progress updates during generation
+- **Error Handling**: Comprehensive error capture and user feedback
+
+### Generation Flow
+1. **Authentication & Verification**
+   - User authentication check
+   - Campaign ownership verification using service role
+   - Pre-generation validation of campaign settings
+
+2. **Content Generation**
+   - GPT-4 integration for content creation
+   - Stage-appropriate content based on sequence type
+   - Proper metadata and CTA inclusion
+
+3. **Email Creation**
+   - Batch processing with progress tracking
+   - Service role for secure database operations
+   - Proper RLS policy compliance
+
+4. **Status Updates**
+   - Real-time progress notifications
+   - Generation status persistence
+   - Error state management
+
+### Security Measures
+- Service role for privileged operations
+- RLS policies for data access control
+- Proper ownership verification
+- Secure metadata handling
+
 ## Current Development State
 
-### Core Features Implemented
-1. **Authentication System**
-   - User signup/signin via Supabase Auth
-   - Protected routes with authentication state management
-   - Comprehensive user profile management
-     - Automatic profile creation on signup
-     - User details (full name, company name, role)
-     - Profile settings page
-     - Row Level Security (RLS) policies for data protection
+### Core Features
+1. **Authentication & Security**
+   - Supabase Auth integration with email/password
+   - Protected routes with auth state management
+   - Row Level Security (RLS) across all tables
+   - Service role for system operations
 
 2. **Campaign Management**
-   - Campaign creation with customizable settings
-   - Campaign status tracking (draft, active, paused, completed)
-   - AI-driven content generation for email sequences
-   - Campaign analytics and performance metrics
+   - Campaign lifecycle management (draft → active → completed)
+   - Sequence type support (awareness, conversion, nurture)
+   - Performance analytics and tracking
+   - CTA management per sequence type
 
 3. **Contact Management**
    - Contact list view with engagement metrics
-   - Contact import via CSV with field mapping
-   - Handling of contacts with missing emails (user choice to include/exclude)
+   - CSV import with field mapping
+   - Smart handling of missing emails
    - Contact engagement scoring
-   - Contact lists with different types (manual, dynamic, segment)
+   - List types: manual, dynamic, segment
 
-4. **Email Sequence Planning**
-   - Visual calendar interface for email scheduling
-   - AI-generated email content
-   - Sequence templates for different campaign types
-   - Real-time analytics tracking
+4. **Email Infrastructure**
+   - SendGrid integration with domain verification
+   - Rate limiting and quota management
+   - Event tracking (opens, clicks, etc.)
+   - Error handling and retry logic
 
-### Database Schema
-The Supabase database includes the following main tables:
-- `profiles`: User profiles and settings
-  - `id`: UUID (references auth.users)
-  - `email`: User's email
-  - `full_name`: User's full name
-  - `company_name`: User's company
-  - `role`: User's role
-  - `created_at`: Timestamp
-  - `updated_at`: Timestamp
-  - Protected by RLS policies
+5. **User Experience**
+   - Real-time notifications system
+   - Interactive calendar interface
+   - Profile management
+   - Comprehensive error feedback
 
-- `domain_settings`: Email domain configuration
-  - `id`: UUID primary key
-  - `user_id`: References auth.users(id)
-  - `domain`: Domain name
-  - `status`: Enum ('pending', 'verified', 'failed', 'sender_pending')
-  - `dns_records`: JSONB array of required DNS records
-  - `sendgrid_domain_id`: SendGrid domain identifier
-  - `sender_email`: Verified sender email address
-  - `sender_verified`: Boolean
-  - `created_at`: Timestamp
-  - `updated_at`: Timestamp
-  - Protected by RLS policies
+### Database Architecture
+Key tables and their relationships:
 
-- `email_events`: Email tracking and analytics
-  - `id`: UUID primary key
-  - `email_id`: References emails(id)
-  - `campaign_id`: References campaigns(id)
-  - `user_id`: References auth.users(id)
-  - `event_type`: Enum ('processed', 'dropped', 'delivered', 'deferred', 'bounce', 'blocked', 'spam_report', 'unsubscribe', 'open', 'click')
-  - `event_data`: JSONB for event details
-  - `occurred_at`: Timestamp
-  - `created_at`: Timestamp
-  - Indexed for performance
-  - Protected by RLS policies
+1. **User Data**
+   - `profiles`: Core user information and preferences
+   - `domain_settings`: Email domain verification and configuration
+   - `subscriptions`: User subscription and billing status
 
-- `rate_limits`: Email sending rate management
-  - `id`: UUID primary key
-  - `user_id`: References auth.users(id)
-  - `window_count`: Current minute's request count
-  - `daily_count`: Current day's email count
-  - `last_window`: Timestamp of last rate limit window
-  - `created_at`: Timestamp
-  - `updated_at`: Timestamp
-  - Protected by RLS policies
+2. **Campaign System**
+   - `campaigns`: Campaign configuration and status
+   - `emails`: Email content and scheduling
+   - `ai_logs`: AI generation tracking
+   - `email_events`: Email delivery and engagement tracking
 
-- `rate_limit_logs`: Rate limit monitoring
-  - `id`: UUID primary key
-  - `user_id`: References auth.users(id)
-  - `event_type`: Enum ('success', 'exceeded')
-  - `request_count`: Number of requests in window
-  - `window_key`: Timestamp of rate limit window
-  - `metadata`: JSONB for additional data
-  - `created_at`: Timestamp
-  - Protected by RLS policies
+3. **Contact Management**
+   - `contacts`: Contact information and metrics
+   - `contact_lists`: List organization
+   - `contact_list_members`: List membership
 
-- `email_errors`: Error tracking and retry management
-  - `id`: UUID primary key
-  - `email_id`: References emails(id)
-  - `campaign_id`: References campaigns(id)
-  - `user_id`: References auth.users(id)
-  - `error_type`: Error classification
-  - `error_message`: Detailed error message
-  - `error_stack`: Error stack trace
-  - `context`: JSONB for error context
-  - `retry_count`: Number of retry attempts
-  - `last_retry_at`: Timestamp of last retry
-  - `next_retry_at`: Timestamp for next retry
-  - `status`: Enum ('pending', 'retrying', 'resolved', 'failed')
-  - `created_at`: Timestamp
-  - `updated_at`: Timestamp
-  - Protected by RLS policies
+4. **System Management**
+   - `notifications`: System notifications
+   - `rate_limits`: Email sending controls
+   - `function_logs`: System operation logging
 
-- `campaigns`: Marketing campaign details
-- `contacts`: Contact information and engagement metrics
-- `contact_lists`: Grouped contacts for targeted campaigns
-- `contact_list_members`: Junction table for contacts in lists
-- `emails`: Email content and scheduling
-- `analytics`: Campaign performance metrics
-- `ai_logs`: AI generation tracking
+All tables implement:
+- Row Level Security (RLS)
+- Created/Updated timestamps
+- UUID primary keys
+- Appropriate indexes
 
-### Recent Implementations
+For detailed schema information, see `docs/database-schema.md`
 
-#### Campaign CTA Links System
-- Sequence-specific Call-to-Action (CTA) links
-  - Awareness sequence links for educational content
-  - Conversion sequence links for sign-ups/purchases
-  - Nurture sequence links for relationship building
-- Automatic CTA inclusion in generated emails
-- Links stored in campaign settings
-- Real-time CTA link updates
-- Proper validation and error handling
+## Recent Implementations
 
-#### Notifications System
-- **Database Structure**
-  - `notifications` table with fields:
-    - `id`: UUID primary key
-    - `user_id`: References auth.users(id)
-    - `title`: Notification title
-    - `message`: Detailed notification message
-    - `type`: Enum ('success', 'error', 'info', 'warning')
-    - `status`: Enum ('read', 'unread')
-    - `metadata`: JSONB for flexible data storage
-      - Supports `action` object with `label` and `url` for clickable notifications
-    - `created_at` and `updated_at`: Timestamps with UTC timezone
+### Campaign CTA Links
+- Type-specific links (awareness, conversion, nurture)
+- Automatic inclusion in generated emails
+- Real-time updates and validation
 
-- **Security Implementation**
-  - Row Level Security (RLS) policies:
-    - Users can view their own notifications
-    - Users can update their own notifications (e.g., marking as read)
-    - Users can delete their own notifications
-    - Service role has full access for system-generated notifications
+### Notifications System
+- Real-time user notifications with action support
+- Campaign generation progress tracking
+- Status-based styling (success, error, info, warning)
+- Clickable actions for direct navigation
 
-- **Real-time Updates**
-  - Supabase real-time subscriptions for instant UI updates
-  - Handles INSERT, UPDATE, and DELETE events
-  - Filters notifications by user_id for data efficiency
-  - Maintains local state synchronization with database
+### Email Sequence Improvements
+- Batch processing for better performance
+- Progress tracking and persistence
+- Enhanced error handling and recovery
+- Service role security integration
 
-- **Campaign Integration**
-  - Automatic notifications for sequence generation:
-    1. Start notification: "Generating Sequence for [Campaign Name]"
-    2. Progress updates: "Generated X of Y emails (Z% complete)"
-    3. Completion notification: "Sequence Generation Complete for [Campaign Name]"
-       - Includes clickable action to view generated sequence
-       - Direct navigation to campaign's emails tab
-  - Notification types reflect operation status:
-    - 'info' for generation start
-    - 'success' for completion
-    - 'error' for failures
-    - 'warning' for important alerts
+### Contact Management Updates
+- Smart CSV import with field mapping
+- Missing email handling improvements
+- Enhanced engagement scoring
+- List management optimization
 
-- **UI Components**
-  - `NotificationsPopover`: Global notification access
-    - Bell icon with unread count
-    - Popover display on click
-    - Real-time unread count updates
-  - `NotificationsList`: Notification management
-    - Displays notifications in reverse chronological order
-    - Visual styling based on notification type
-    - Individual and bulk actions:
-      - Mark as read/unread
-      - Delete individual notifications
-      - Clear all notifications
-    - Action buttons for notifications with metadata.action
-    - Auto-dismissing success messages (6.5 seconds)
+## Development Setup
 
-- **Hook Implementation**
-  - `useNotifications` hook provides:
-    - Notification state management
-    - CRUD operations:
-      - `createNotification`: Create new notifications
-      - `markAsRead`: Update notification status
-      - `deleteNotification`: Remove single notification
-      - `deleteAllNotifications`: Clear all user notifications
-    - Real-time subscription management
-    - Loading and error states
-    - Automatic cleanup on unmount
+### Prerequisites
+- Node.js 18+
+- Supabase CLI
+- PostgreSQL 14+
+- Git
 
-- **Performance Optimizations**
-  - Limit of 50 most recent notifications
-  - Indexed queries for faster retrieval
-  - Memoized unread count calculation
-  - Efficient state updates using React state updater functions
-  - Proper cleanup of real-time subscriptions
+### Initial Setup
+```bash
+# Clone and install
+git clone [repository-url]
+cd mailvanta
+npm install
 
-- **Error Handling**
-  - Graceful error management for all operations
-  - Clear error messages in console
-  - User-friendly error states in UI
-  - Automatic retry mechanism for failed operations
-  - Proper type safety with TypeScript
+# Environment setup
+cp .env.example .env
+# Edit .env with your values:
+# - VITE_SUPABASE_URL
+# - VITE_SUPABASE_ANON_KEY
+# - OPENAI_API_KEY
+# - SENDGRID_API_KEY
 
-This notification system provides real-time feedback for campaign operations, enhancing user experience with immediate updates on sequence generation progress and other important events.
+# Start Supabase
+supabase start
 
-#### User Profile System
-- Automatic profile creation on user signup via database trigger
-- Profile management interface with fields:
-  - Email (read-only)
-  - Full Name
-  - Company Name
-  - Role
-- Real-time profile updates
-- Proper error handling and fallback mechanisms
-- RLS policies for data security:
-  - Users can view their own profile
-  - Users can update their own profile
-  - Users can insert their own profile
-  - Automatic profile creation on signup
+# Run migrations
+supabase migration up
 
-#### Contact Import System
-- CSV file upload with preview
-- Field mapping interface
-- Handling of missing email addresses
-- Batch processing for large imports
-- Real-time validation and error handling
+# Start development
+npm run dev
+```
 
-#### Contact Lists Feature
-- Different list types (manual, dynamic, segment)
-- List management interface
-- Contact engagement tracking
-- Automatic scoring system
+### Development Commands
+```bash
+npm run dev          # Start development server
+npm run build        # Build for production
+npm run preview      # Preview production build
+npm test            # Run tests
+npm run lint        # Run linter
+npm run typecheck   # Run type checks
+```
 
-#### SendGrid Email Integration
-- **Email Service Architecture**
-  - Modular provider-based design
-  - Support for multiple email providers (SendGrid, Mock for testing)
-  - Singleton pattern for service management
-  - Comprehensive interface definitions for email operations
-
-- **SendGrid Provider Implementation**
-  - Full SendGrid API integration with TypeScript types
-  - Features:
-    - Email sending with HTML content
-    - Domain verification and management
-    - Sender verification system
-    - Rate limiting and quota management
-    - Comprehensive error handling
-  - Security:
-    - API key management
-    - Domain verification records
-    - Sender verification process
-    - Rate limit enforcement
-
-- **Email Service Features**
-  - Daily sending limits (100 emails/day for free tier)
-  - Rate limiting (1 second between emails)
-  - Automatic retry mechanism
-  - Error logging and monitoring
-  - Domain verification status tracking
-  - Sender verification workflow
-  - Cache management for API responses
-
-#### Testing Suite Implementation
-- **Comprehensive Test Coverage**
-  - Unit tests for all core functionality
-  - Integration tests for email operations
-  - Mock provider for testing without API calls
-  - Proper error case coverage
-  - Rate limit testing
-  - Retry mechanism verification
-
-- **Test Infrastructure**
-  - Vitest test runner configuration
-  - Mock implementations for external services
-  - Type-safe test utilities
-  - Proper test isolation
-  - Automatic test environment setup/teardown
-
-- **Mock System**
-  - Mock email provider for testing
-  - Simulated rate limits and quotas
-  - Configurable delay simulation
-  - Error scenario simulation
-  - Type-safe mock implementations
-
-- **Test Categories**
-  - Service initialization tests
-  - Provider switching tests
-  - Email sending operation tests
-  - Domain verification tests
-  - Sender verification tests
-  - Rate limiting tests
-  - Error handling tests
-  - Mock provider tests
-
-- **CI/CD Integration**
-  - Automated test runs
-  - Coverage reporting
-  - Test environment variables
-  - Proper secret management
-  - Test failure reporting
-
-#### Scheduler Test Implementation
-- **Test Suite Architecture**
-  - Comprehensive test coverage for email scheduling system
-  - Proper mocking of Supabase client and EmailService
-  - Environment variable management for testing
-  - Detailed test cases for various scenarios
-
-- **Mock Implementation Details**
-  1. **Supabase Client Mocking**
-     - Proper method chaining simulation:
-       ```typescript
-       from().select().eq().lte() // for fetching emails
-       from().update().eq()       // for updating status
-       ```
-     - Accurate response structure matching:
-       - Mock email data with all required fields
-       - Proper error handling simulation
-       - Correct status codes and responses
-
-  2. **Environment Variables**
-     - Test-specific environment setup:
-       - Supabase URL and service role key
-       - SendGrid API key
-       - Test mode indicators
-     - Proper cleanup between tests
-
-  3. **EmailService Mocking**
-     - Simulated email sending functionality
-     - Error case handling
-     - Success/failure scenarios
-
-- **Test Cases**
-  1. **Successful Email Sending**
-     - Verifies proper email processing
-     - Checks status updates
-     - Validates response format
-     - Ensures correct sent count
-
-  2. **No Due Emails Scenario**
-     - Tests empty response handling
-     - Validates appropriate message
-     - Checks zero sent count
-     - Ensures proper status code
-
-  3. **Email Sending Failures**
-     - Tests error handling
-     - Verifies status updates
-     - Checks error logging
-     - Validates response format
-
-- **Implementation Improvements**
-  1. **Mock Data Structure**
-     - Properly structured email objects
-     - Complete metadata inclusion
-     - Accurate timestamp handling
-     - Correct status management
-
-  2. **Method Chaining**
-     - Accurate representation of Supabase queries
-     - Proper promise resolution
-     - Correct error handling
-     - Maintained state between calls
-
-  3. **Response Handling**
-     - Proper status code checking
-     - Accurate success/failure messages
-     - Correct data structure
-     - Appropriate error formats
-
-This implementation ensures reliable testing of the email scheduling system, with proper isolation of dependencies and comprehensive coverage of various scenarios.
-
-### Testing Workflow
-1. **Local Development Testing**
-   - Run tests: `npm test`
-   - Watch mode: `npm test -- --watch`
-   - Coverage report: `npm run test:coverage`
-   - UI test runner: `npm run test:ui`
-
-2. **Test Environment Setup**
+### Common Tasks
+1. **Creating Migrations**
    ```bash
-   # Create test environment file
-   cp .env.example .env.test
-
-   # Configure test variables
-   SUPABASE_URL=http://localhost:54321
-   SUPABASE_SERVICE_ROLE_KEY=test-service-role-key
-   SENDGRID_API_KEY=test-sendgrid-key
-   SENDGRID_WEBHOOK_KEY=test-webhook-key
+   supabase migration new my_migration_name
    ```
 
-3. **Running Specific Tests**
+2. **Updating Types**
    ```bash
-   # Run email service tests
-   npm test src/lib/email/__tests__/email.service.test.ts
-
-   # Run all tests in a directory
-   npm test src/lib/email/__tests__/
-
-   # Run tests matching a pattern
-   npm test -- -t "should send email"
+   supabase gen types typescript --local > src/types/supabase.ts
    ```
+
+3. **Testing Edge Functions**
+   ```bash
+   supabase functions serve --env-file .env
+   ```
+
+## Contributing
+
+[Content continues...]
+
+## Technical Stack
+
+### Frontend
+- React 18 with TypeScript
+- TailwindCSS & shadcn/ui
+- Vite for build tooling
+- Key libraries:
+  - FullCalendar: Email scheduling
+  - PapaParse: CSV processing
+  - Zod: Type validation
+
+### Backend (Supabase)
+- PostgreSQL 14 with RLS
+- Edge Functions (Deno)
+- Real-time subscriptions
+- Storage for attachments
+
+### External Services
+- OpenAI GPT-4: Content generation
+- SendGrid: Email delivery
+- Stripe: Payment processing
+
+### Project Structure
+```
+src/
+├── components/        # UI components
+│   ├── campaign/     # Campaign-related components
+│   ├── email/        # Email-related components
+│   └── common/       # Shared components
+├── hooks/            # React hooks
+├── lib/              # Core libraries
+│   ├── supabase/     # Database client
+│   ├── openai/       # AI integration
+│   └── email/        # Email service
+├── pages/            # Route pages
+└── utils/            # Shared utilities
+```
+
+## Development Setup
+
+[Content continues...]
 
 ## Technical Architecture
 
