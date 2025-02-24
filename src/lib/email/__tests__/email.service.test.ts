@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { emailService } from '../service';
 import { SendGridProvider } from '../providers/sendgrid';
-import { MockEmailProvider } from '../providers/mock';
 import type { SendEmailOptions } from '../types';
 
 // Mock @sendgrid/mail and @sendgrid/client
@@ -17,6 +16,13 @@ vi.mock('@sendgrid/client', () => ({
     setApiKey: vi.fn(),
     request: vi.fn()
   }))
+}));
+
+// Mock environment variables
+vi.mock('import.meta', () => ({
+  env: {
+    VITE_SENDGRID_API_KEY: undefined
+  }
 }));
 
 // Mock supabase client
@@ -48,55 +54,11 @@ vi.mock('../../supabase/client', () => {
   };
 });
 
-interface MockQueryResult {
-  data: any;
-  error: null | Error;
-  count?: number;
-}
-
-interface MockQuery {
-  select: () => MockQuery;
-  insert: () => MockQuery;
-  update: () => MockQuery;
-  delete: () => MockQuery;
-  eq: () => MockQuery;
-  gte: () => MockQuery;
-  single: () => Promise<MockQueryResult>;
-  then: (callback: (result: MockQueryResult) => any) => Promise<any>;
-}
-
-interface SupabaseMock {
-  from: (table: string) => MockQuery;
-}
-
-// Create a more robust Supabase mock
-const createSupabaseMock = (): SupabaseMock => {
-  const mockQuery: MockQuery = {
-    select: vi.fn(() => mockQuery),
-    insert: vi.fn(() => mockQuery),
-    update: vi.fn(() => mockQuery),
-    delete: vi.fn(() => mockQuery),
-    eq: vi.fn(() => mockQuery),
-    gte: vi.fn(() => mockQuery),
-    single: vi.fn(() => Promise.resolve({
-      data: {
-        status: 'verified',
-        domain: 'example.com',
-        sender_email: 'sender@example.com'
-      },
-      error: null
-    })),
-    then: vi.fn((callback) => Promise.resolve(callback({ data: [], count: 0, error: null })))
-  };
-
-  return {
-    from: vi.fn(() => mockQuery)
-  };
-};
-
 describe('EmailService', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Reset the provider before each test
+    (emailService as any).provider = null;
   });
 
   afterEach(() => {
@@ -104,24 +66,27 @@ describe('EmailService', () => {
   });
 
   describe('initialization', () => {
-    it('should initialize with SendGrid provider', () => {
-      emailService.initialize('sendgrid', { apiKey: 'test-key' });
+    it('should initialize with SendGrid provider when API key is provided', () => {
+      emailService.initialize('test-key');
       expect(emailService.getProvider()).toBeInstanceOf(SendGridProvider);
     });
 
-    it('should initialize with Mock provider', () => {
-      emailService.initialize('mock');
-      expect(emailService.getProvider()).toBeInstanceOf(MockEmailProvider);
+    it('should throw error when no API key is available', () => {
+      expect(() => emailService.getProvider()).toThrow('Email provider not initialized and no API key available');
     });
 
-    it('should throw error when initializing SendGrid without API key', () => {
-      expect(() => emailService.initialize('sendgrid')).toThrow('SendGrid API key is required');
+    it('should initialize with environment variable if available', () => {
+      // Mock the environment variable
+      (import.meta.env as any).VITE_SENDGRID_API_KEY = 'env-test-key';
+      expect(emailService.getProvider()).toBeInstanceOf(SendGridProvider);
+      // Clean up
+      (import.meta.env as any).VITE_SENDGRID_API_KEY = undefined;
     });
 
-    it('should reuse existing provider if same type', () => {
-      emailService.initialize('mock');
+    it('should reuse existing provider', () => {
+      emailService.initialize('test-key');
       const firstProvider = emailService.getProvider();
-      emailService.initialize('mock');
+      emailService.initialize('different-key');
       const secondProvider = emailService.getProvider();
       expect(firstProvider).toBe(secondProvider);
     });
@@ -138,40 +103,56 @@ describe('EmailService', () => {
       content: '<p>Test content</p>',
       metadata: {
         emailId: 'test-id',
-        userId: 'user-id'
+        userId: 'user-id',
+        campaignId: 'campaign-id'
       }
     };
 
     beforeEach(() => {
-      emailService.initialize('sendgrid', { apiKey: 'test-key' });
+      emailService.initialize('test-key');
     });
 
     it('should send email successfully', async () => {
       const provider = emailService.getProvider() as SendGridProvider;
-      const mailService = (provider as any).mailService;
-      mailService.send.mockResolvedValueOnce([
-        { statusCode: 202, headers: { 'x-message-id': 'test-message-id' } }
-      ]);
+      global.fetch = vi.fn().mockResolvedValueOnce({
+        ok: true,
+        status: 202,
+        statusText: 'Accepted',
+        headers: new Headers({
+          'x-message-id': 'test-message-id'
+        }),
+        json: () => Promise.resolve({})
+      });
 
       const result = await provider.sendEmail(mockOptions);
       expect(result.success).toBe(true);
       expect(result.messageId).toBe('test-message-id');
-      expect(mailService.send).toHaveBeenCalledWith(expect.objectContaining({
-        to: mockOptions.to,
-        from: mockOptions.from,
-        subject: mockOptions.subject,
-        html: mockOptions.content
-      }));
+      expect(global.fetch).toHaveBeenCalledWith(
+        'https://api.sendgrid.com/v3/mail/send',
+        expect.objectContaining({
+          method: 'POST',
+          headers: expect.objectContaining({
+            'Authorization': 'Bearer test-key',
+            'Content-Type': 'application/json'
+          })
+        })
+      );
     });
 
     it('should handle send failure', async () => {
       const provider = emailService.getProvider() as SendGridProvider;
-      const mailService = (provider as any).mailService;
-      mailService.send.mockRejectedValueOnce(new Error('Failed to send'));
+      global.fetch = vi.fn().mockResolvedValueOnce({
+        ok: false,
+        status: 400,
+        statusText: 'Bad Request',
+        json: () => Promise.resolve({
+          errors: [{ message: 'Invalid recipient email' }]
+        })
+      });
 
       const result = await provider.sendEmail(mockOptions);
       expect(result.success).toBe(false);
-      expect(result.error).toBe('Failed to send');
+      expect(result.error).toBe('Invalid recipient email');
     });
 
     it('should verify domain', async () => {
@@ -215,46 +196,6 @@ describe('EmailService', () => {
       expect(result.dailyLimit).toBe(100);
       expect(result.remainingToday).toBe(100);
       expect(result.rateLimitDelay).toBe(1000);
-    });
-  });
-
-  describe('MockEmailProvider', () => {
-    beforeEach(() => {
-      emailService.initialize('mock');
-    });
-
-    it('should simulate email sending', async () => {
-      const provider = emailService.getProvider();
-      const result = await provider.sendEmail({
-        to: 'test@example.com',
-        from: { email: 'sender@example.com' },
-        subject: 'Test',
-        content: 'Test content',
-        metadata: { emailId: 'test', userId: 'user-id' }
-      });
-
-      expect(result.success).toBe(true);
-      expect(result.messageId).toMatch(/^mock_/);
-    });
-
-    it('should simulate daily limit exceeded', async () => {
-      const provider = emailService.getProvider() as MockEmailProvider;
-      
-      // Directly set the sent count to simulate reaching the limit
-      (provider as any).sentEmails = {
-        'user-id': 100
-      };
-
-      const result = await provider.sendEmail({
-        to: 'test@example.com',
-        from: { email: 'sender@example.com' },
-        subject: 'Test',
-        content: 'Test content',
-        metadata: { emailId: 'test-limit', userId: 'user-id' }
-      });
-
-      expect(result.success).toBe(false);
-      expect(result.error).toBe('Daily sending limit reached');
     });
   });
 }); 

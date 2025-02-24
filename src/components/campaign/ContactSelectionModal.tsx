@@ -6,6 +6,7 @@ import { Checkbox } from '../shadcn/Checkbox';
 import { supabase } from '../../lib/supabase/client';
 import type { Contact, ContactList } from '../../types';
 import { LoadingState } from '../common/LoadingState';
+import { useAuth } from '../../contexts/AuthContext';
 
 interface ContactSelectionModalProps {
   onClose: () => void;
@@ -14,6 +15,7 @@ interface ContactSelectionModalProps {
 }
 
 export function ContactSelectionModal({ onClose, onSave, campaignId }: ContactSelectionModalProps) {
+  const { user } = useAuth();
   const [lists, setLists] = useState<ContactList[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [selectedListId, setSelectedListId] = useState<string | 'all'>('all');
@@ -25,11 +27,13 @@ export function ContactSelectionModal({ onClose, onSave, campaignId }: ContactSe
 
   useEffect(() => {
     const fetchData = async () => {
+      if (!user) return;
       try {
         // Fetch contact lists
         const { data: listsData, error: listsError } = await supabase
           .from('contact_lists')
           .select('*')
+          .eq('user_id', user.id)
           .order('created_at', { ascending: false });
 
         if (listsError) throw listsError;
@@ -39,6 +43,7 @@ export function ContactSelectionModal({ onClose, onSave, campaignId }: ContactSe
         const { data: contactsData, error: contactsError } = await supabase
           .from('contacts')
           .select('*')
+          .eq('user_id', user.id)
           .neq('campaign_id', campaignId) // Exclude contacts already in this campaign
           .order('created_at', { ascending: false });
 
@@ -52,9 +57,10 @@ export function ContactSelectionModal({ onClose, onSave, campaignId }: ContactSe
     };
 
     fetchData();
-  }, [campaignId]);
+  }, [campaignId, user]);
 
   const handleListChange = async (listId: string | 'all') => {
+    if (!user) return;
     setSelectedListId(listId);
     setLoading(true);
     setSelectedContactIds(new Set()); // Clear selections when changing lists
@@ -64,6 +70,7 @@ export function ContactSelectionModal({ onClose, onSave, campaignId }: ContactSe
         const { data, error } = await supabase
           .from('contacts')
           .select('*')
+          .eq('user_id', user.id)
           .neq('campaign_id', campaignId) // Exclude contacts already in this campaign
           .order('created_at', { ascending: false });
 
@@ -83,6 +90,7 @@ export function ContactSelectionModal({ onClose, onSave, campaignId }: ContactSe
         const { data, error } = await supabase
           .from('contacts')
           .select('*')
+          .eq('user_id', user.id)
           .in('id', contactIds)
           .neq('campaign_id', campaignId) // Exclude contacts already in this campaign
           .order('created_at', { ascending: false });
@@ -106,7 +114,28 @@ export function ContactSelectionModal({ onClose, onSave, campaignId }: ContactSe
     setSaving(true);
     try {
       const selectedContacts = contacts.filter(contact => selectedContactIds.has(contact.id));
-      await onSave(selectedContacts);
+      
+      // Update the campaign_id for selected contacts while preserving all other fields
+      const { error: updateError } = await supabase
+        .from('contacts')
+        .update({ 
+          campaign_id: campaignId,
+          updated_at: new Date().toISOString()
+        })
+        .in('id', Array.from(selectedContactIds));
+
+      if (updateError) throw updateError;
+
+      // Fetch the updated contacts to ensure we have the latest data
+      const { data: updatedContacts, error: fetchError } = await supabase
+        .from('contacts')
+        .select('*')
+        .in('id', Array.from(selectedContactIds))
+        .order('created_at', { ascending: false });
+
+      if (fetchError) throw fetchError;
+      
+      await onSave(updatedContacts || []);
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to add contacts to campaign');

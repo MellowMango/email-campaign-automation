@@ -229,6 +229,20 @@ class EmailService {
       }
 
       const messageId = response.headers.get('X-Message-ID');
+
+      // Store the message ID in the email record
+      if (messageId) {
+        await this.supabase
+          .from('emails')
+          .update({
+            metadata: {
+              sg_message_id: messageId,
+              ...options.metadata
+            }
+          })
+          .eq('id', options.metadata.emailId);
+      }
+
       return {
         success: true,
         messageId

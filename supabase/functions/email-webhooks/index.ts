@@ -1,6 +1,6 @@
-import { createClient } from '@supabase/supabase-js';
-import { serve } from '@std/http/server';
-import { crypto } from '@std/crypto/mod';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7';
+import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
+import { crypto } from 'https://deno.land/std@0.168.0/crypto/mod.ts';
 
 // Rate limiting configuration
 const RATE_LIMIT = {
@@ -14,7 +14,7 @@ interface SendGridEvent {
   email: string;
   timestamp: number;
   'smtp-id': string;
-  event: 'processed' | 'dropped' | 'delivered' | 'deferred' | 'bounce' | 'blocked' | 'spam_report' | 'unsubscribe' | 'group_unsubscribe' | 'group_resubscribe' | 'open' | 'click';
+  event: 'processed' | 'dropped' | 'delivered' | 'deferred' | 'bounce' | 'blocked' | 'spam_report' | 'unsubscribe' | 'group_unsubscribe' | 'group_resubscribe' | 'open' | 'click' | 'reply';
   category: string[];
   sg_event_id: string;
   sg_message_id: string;
@@ -131,11 +131,13 @@ async function processWebhookEvent(supabase: any, event: SendGridEvent): Promise
   const { email, timestamp, event: eventType, sg_message_id, reason, status } = event;
 
   try {
-    // Find the email record
+    console.log('Processing webhook event:', { eventType, sg_message_id });
+
+    // Find the email record with proper SQL syntax
     const { data: emailData, error: emailError } = await supabase
       .from('emails')
-      .select('*')
-      .eq('metadata->>sg_message_id', sg_message_id)
+      .select('id, campaign_id, metadata')
+      .or(`metadata->>sg_message_id.eq.${sg_message_id}, metadata->>messageId.eq.${sg_message_id}`)
       .single();
 
     if (emailError || !emailData) {
@@ -143,14 +145,17 @@ async function processWebhookEvent(supabase: any, event: SendGridEvent): Promise
       return { success: false, error: 'Email not found' };
     }
 
+    console.log('Found email:', emailData);
+
     // Log the event first
     const { error: eventError } = await supabase
       .from('email_events')
       .insert({
         email_id: emailData.id,
+        campaign_id: emailData.campaign_id,
         event_type: eventType,
-        timestamp: new Date(timestamp * 1000).toISOString(),
-        metadata: event
+        event_data: event,
+        occurred_at: new Date(timestamp * 1000).toISOString()
       });
 
     if (eventError) {
@@ -158,46 +163,61 @@ async function processWebhookEvent(supabase: any, event: SendGridEvent): Promise
       return { success: false, error: 'Failed to log event' };
     }
 
-    // Handle error events first
-    if (['bounce', 'dropped', 'blocked'].includes(eventType)) {
-      // Log error
-      const { error: errorRecordError } = await supabase
-        .from('email_errors')
-        .insert({
-          email_id: emailData.id,
-          error_type: eventType,
-          error_message: reason || status || 'Unknown error',
-          timestamp: new Date(timestamp * 1000).toISOString(),
-          metadata: event
-        });
+    console.log('Event logged successfully');
 
-      if (errorRecordError) {
-        console.error('Error logging error record:', errorRecordError);
-        return { success: false, error: 'Failed to log error record' };
-      }
+    // Update campaign analytics
+    const { data: campaign, error: campaignError } = await supabase
+      .from('campaigns')
+      .select('analytics')
+      .eq('id', emailData.campaign_id)
+      .single();
 
-      // Add to retry queue if appropriate
-      if ((emailData.retry_count || 0) < 3) {
-        const { error: retryError } = await supabase
-          .from('retry_queue')
-          .insert({
-            email_id: emailData.id,
-            error_type: eventType,
-            retry_count: (emailData.retry_count || 0) + 1,
-            next_retry: new Date(Date.now() + 3600000).toISOString(), // Retry in 1 hour
-            error_message: reason || status || 'Unknown error'
-          });
-
-        if (retryError) {
-          console.error('Error adding to retry queue:', retryError);
-        }
-      }
+    if (campaignError) {
+      console.error('Error fetching campaign:', campaignError);
+      return { success: false, error: 'Failed to fetch campaign' };
     }
 
-    // Prepare updates based on event type
+    console.log('Current campaign analytics:', campaign?.analytics);
+
+    const analytics = campaign?.analytics || { sent: 0, opened: 0, clicked: 0, replied: 0 };
+
+    // Update analytics based on event type
+    switch (eventType) {
+      case 'processed':
+      case 'delivered':
+        analytics.sent = (analytics.sent || 0) + 1;
+        break;
+      case 'open':
+        analytics.opened = (analytics.opened || 0) + 1;
+        break;
+      case 'click':
+        analytics.clicked = (analytics.clicked || 0) + 1;
+        break;
+      case 'reply':
+        analytics.replied = (analytics.replied || 0) + 1;
+        break;
+    }
+
+    console.log('Updated analytics:', analytics);
+
+    const { error: updateError } = await supabase
+      .from('campaigns')
+      .update({ analytics })
+      .eq('id', emailData.campaign_id);
+
+    if (updateError) {
+      console.error('Error updating campaign analytics:', updateError);
+      return { success: false, error: 'Failed to update analytics' };
+    }
+
+    console.log('Campaign analytics updated successfully');
+
+    // Update email status and counts
     const updates: Record<string, any> = {
       updated_at: new Date(timestamp * 1000).toISOString()
     };
+
+    const metadata = emailData.metadata || {};
 
     switch (eventType) {
       case 'delivered':
@@ -207,12 +227,12 @@ async function processWebhookEvent(supabase: any, event: SendGridEvent): Promise
       case 'open':
         updates.opened = true;
         updates.opened_at = new Date(timestamp * 1000).toISOString();
-        updates.opens_count = (emailData.opens_count || 0) + 1;
+        metadata.opens_count = (metadata.opens_count || 0) + 1;
         break;
       case 'click':
         updates.clicked = true;
         updates.clicked_at = new Date(timestamp * 1000).toISOString();
-        updates.clicks_count = (emailData.clicks_count || 0) + 1;
+        metadata.clicks_count = (metadata.clicks_count || 0) + 1;
         break;
       case 'bounce':
       case 'dropped':
@@ -221,7 +241,6 @@ async function processWebhookEvent(supabase: any, event: SendGridEvent): Promise
         updates.error_message = reason || status;
         updates.error_type = eventType;
         updates.failed_at = new Date(timestamp * 1000).toISOString();
-        updates.retry_count = (emailData.retry_count || 0) + 1;
         break;
       case 'spam_report':
       case 'unsubscribe':
@@ -232,16 +251,22 @@ async function processWebhookEvent(supabase: any, event: SendGridEvent): Promise
         break;
     }
 
-    // Update email status
-    const { error: updateError } = await supabase
+    // Update metadata
+    updates.metadata = metadata;
+
+    console.log('Updating email with:', updates);
+
+    const { error: emailUpdateError } = await supabase
       .from('emails')
       .update(updates)
       .eq('id', emailData.id);
 
-    if (updateError) {
-      console.error('Error updating email:', updateError);
+    if (emailUpdateError) {
+      console.error('Error updating email:', emailUpdateError);
       return { success: false, error: 'Failed to update email status' };
     }
+
+    console.log('Email updated successfully');
 
     return { success: true };
   } catch (error) {
@@ -521,9 +546,14 @@ async function logRateLimitWarning(supabase: any, userId: string, warningType: s
   }
 }
 
-// Export the handler function for testing
-export async function handleWebhook(req: Request, supabase: SupabaseClient): Promise<Response> {
+// Main handler function
+export const handleRequest = async (req: Request) => {
   try {
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL') || '',
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
+    );
+
     // Only allow POST requests
     if (req.method !== 'POST') {
       return new Response(JSON.stringify({
@@ -535,78 +565,75 @@ export async function handleWebhook(req: Request, supabase: SupabaseClient): Pro
       });
     }
 
-    // Parse and validate the webhook payload
-    const event = await req.json();
-    if (!event || !event.type || !event.email_id) {
+    // Get the raw body for signature verification
+    const rawBody = await req.text();
+    console.log('Received webhook payload:', rawBody);
+
+    // Verify webhook signature
+    const isValid = await verifySignature(req, rawBody);
+    if (!isValid) {
+      console.error('Invalid webhook signature');
       return new Response(JSON.stringify({
         success: false,
-        message: 'Invalid webhook payload'
+        message: 'Invalid signature'
+      }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
+    // Parse events - SendGrid can send single event or array of events
+    let events: SendGridEvent[];
+    try {
+      const parsed = JSON.parse(rawBody);
+      events = Array.isArray(parsed) ? parsed : [parsed];
+    } catch (error) {
+      console.error('Error parsing webhook payload:', error);
+      return new Response(JSON.stringify({
+        success: false,
+        message: 'Invalid JSON payload'
       }), {
         status: 400,
         headers: { 'Content-Type': 'application/json' }
       });
     }
 
-    // Process the event based on its type
-    switch (event.type) {
-      case 'delivered':
-        await supabase
-          .from('emails')
-          .update({
-            status: 'delivered',
-            delivered_at: new Date().toISOString()
-          })
-          .eq('id', event.email_id);
-        break;
+    console.log('Processing events:', events);
 
-      case 'error':
-        await supabase
-          .from('email_retries')
-          .insert({
-            email_id: event.email_id,
-            error: event.error,
-            retry_count: 0,
-            next_retry: new Date(Date.now() + 300000).toISOString() // Retry in 5 minutes
-          });
-        break;
+    // Process each event
+    const results = await Promise.all(
+      events.map(event => processWebhookEvent(supabase, event))
+    );
 
-      default:
-        return new Response(JSON.stringify({
-          success: false,
-          message: 'Unsupported event type'
-        }), {
-          status: 400,
-          headers: { 'Content-Type': 'application/json' }
-        });
+    // Check if any events failed
+    const hasErrors = results.some(result => !result.success);
+    if (hasErrors) {
+      const errors = results
+        .filter(result => !result.success)
+        .map(result => result.error);
+      
+      console.error('Some events failed processing:', errors);
+      
+      return new Response(JSON.stringify({
+        success: false,
+        message: 'Some events failed to process',
+        errors
+      }), {
+        status: 207,
+        headers: { 'Content-Type': 'application/json' }
+      });
     }
 
     return new Response(JSON.stringify({
       success: true,
-      message: 'Webhook processed successfully'
+      message: 'All events processed successfully'
     }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' }
     });
-  } catch (error) {
-    return new Response(JSON.stringify({
-      success: false,
-      message: error instanceof Error ? error.message : 'Internal server error'
-    }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' }
-    });
-  }
-}
 
-// Main handler function
-export const handleRequest = async (req: Request) => {
-  try {
-    const supabase = createClient(
-      Deno.env.get('SUPABASE_URL') || '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
-    );
-    return await handleWebhook(req, supabase);
   } catch (error) {
+    console.error('Webhook processing error:', error);
     return new Response(JSON.stringify({
       success: false,
       message: error instanceof Error ? error.message : 'Internal server error'
@@ -619,5 +646,5 @@ export const handleRequest = async (req: Request) => {
 
 // Start server if not in test environment
 if (!Deno.env.get('VITEST')) {
-  Deno.serve(handleRequest);
+  serve(handleRequest);
 } 

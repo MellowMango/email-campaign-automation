@@ -1,4 +1,6 @@
 import { Card } from '../shadcn/Card';
+import { useState, useEffect } from 'react';
+import { supabase } from '../../lib/supabase/client';
 import type { Campaign, Contact } from '../../types';
 
 interface CampaignAnalyticsProps {
@@ -6,7 +8,62 @@ interface CampaignAnalyticsProps {
   contacts: Contact[];
 }
 
+interface DailyEngagement {
+  date: string;
+  opens: number;
+  clicks: number;
+  replies: number;
+  total_sent: number;
+}
+
 export function CampaignAnalytics({ campaign, contacts }: CampaignAnalyticsProps) {
+  const [dailyEngagement, setDailyEngagement] = useState<DailyEngagement[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchDailyEngagement();
+  }, [campaign.id]);
+
+  const fetchDailyEngagement = async () => {
+    try {
+      const last7Days = Array.from({ length: 7 }, (_, i) => {
+        const date = new Date();
+        date.setDate(date.getDate() - i);
+        return date.toISOString().split('T')[0];
+      }).reverse();
+
+      // Fetch email events for the campaign
+      const { data: events, error } = await supabase
+        .from('email_events')
+        .select('event_type, occurred_at')
+        .eq('campaign_id', campaign.id)
+        .gte('occurred_at', last7Days[0]);
+
+      if (error) throw error;
+
+      // Process events into daily stats
+      const dailyStats = last7Days.map(date => {
+        const dayEvents = events?.filter(event => 
+          event.occurred_at.split('T')[0] === date
+        ) || [];
+
+        return {
+          date,
+          opens: dayEvents.filter(e => e.event_type === 'open').length,
+          clicks: dayEvents.filter(e => e.event_type === 'click').length,
+          replies: dayEvents.filter(e => e.event_type === 'reply').length,
+          total_sent: dayEvents.filter(e => e.event_type === 'processed').length
+        };
+      });
+
+      setDailyEngagement(dailyStats);
+    } catch (error) {
+      console.error('Error fetching daily engagement:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Calculate metrics
   const totalEmails = campaign.analytics?.sent || 0;
   const openRate = totalEmails ? Math.round((campaign.analytics?.opened || 0) / totalEmails * 100) : 0;
@@ -21,13 +78,6 @@ export function CampaignAnalytics({ campaign, contacts }: CampaignAnalyticsProps
     converted: contacts.filter(c => c.status === 'converted').length,
     unsubscribed: contacts.filter(c => c.status === 'unsubscribed').length
   };
-
-  // Calculate engagement trend (last 7 days)
-  const last7Days = Array.from({ length: 7 }, (_, i) => {
-    const date = new Date();
-    date.setDate(date.getDate() - i);
-    return date.toISOString().split('T')[0];
-  }).reverse();
 
   return (
     <div className="space-y-8">
@@ -163,26 +213,39 @@ export function CampaignAnalytics({ campaign, contacts }: CampaignAnalyticsProps
       {/* Daily Engagement */}
       <Card className="p-6">
         <h3 className="text-xl font-semibold mb-4">Daily Engagement</h3>
-        <div className="grid grid-cols-7 gap-2">
-          {last7Days.map((date) => (
-            <div key={date} className="text-center">
-              <div className="text-sm text-gray-400">
-                {new Date(date).toLocaleDateString(undefined, { weekday: 'short' })}
-              </div>
-              <div className="h-24 bg-gray-800 rounded-lg mt-2 relative">
-                <div
-                  className="absolute bottom-0 w-full bg-indigo-500 rounded-b-lg"
-                  style={{
-                    height: '60%' // This would be dynamic based on actual data
-                  }}
-                />
-              </div>
-              <div className="text-sm mt-1">
-                {Math.floor(Math.random() * 100)}% {/* This would be actual data */}
-              </div>
-            </div>
-          ))}
-        </div>
+        {loading ? (
+          <div className="text-center py-4">Loading engagement data...</div>
+        ) : (
+          <div className="grid grid-cols-7 gap-2">
+            {dailyEngagement.map((day) => {
+              const engagementRate = day.total_sent 
+                ? Math.round(((day.opens + day.clicks + day.replies) / (day.total_sent * 3)) * 100)
+                : 0;
+
+              return (
+                <div key={day.date} className="text-center">
+                  <div className="text-sm text-gray-400">
+                    {new Date(day.date).toLocaleDateString(undefined, { weekday: 'short' })}
+                  </div>
+                  <div className="h-24 bg-gray-800 rounded-lg mt-2 relative">
+                    <div
+                      className="absolute bottom-0 w-full bg-indigo-500 rounded-b-lg transition-all duration-300"
+                      style={{
+                        height: `${engagementRate}%`
+                      }}
+                    />
+                  </div>
+                  <div className="text-sm mt-1">
+                    <div>{engagementRate}%</div>
+                    <div className="text-xs text-gray-400">
+                      Opens: {day.opens} | Clicks: {day.clicks} | Replies: {day.replies}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </Card>
     </div>
   );

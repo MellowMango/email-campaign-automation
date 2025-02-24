@@ -835,3 +835,47 @@ try {
 - Network errors are tracked separately
 - Authentication errors trigger automatic sign-out when needed
 - Error recovery attempts are logged for debugging
+
+## Email Analytics System
+
+The email analytics system works through a combination of SendGrid webhooks and our Edge Functions. Here's how it works:
+
+### Analytics Data Structure
+Campaign analytics are stored in a simple, flat structure:
+```typescript
+{
+  sent: number;     // Total emails sent
+  opened: number;   // Total opens
+  clicked: number;  // Total clicks
+  replied: number;  // Total replies
+}
+```
+
+### Event Flow
+1. When an email is sent via SendGrid, it triggers webhook events for different interactions:
+   - `processed`: Email has been sent
+   - `delivered`: Email was successfully delivered
+   - `open`: Recipient opened the email
+   - `click`: Recipient clicked a link
+   - `reply`: Recipient replied to the email
+
+2. Our `email-webhooks` Edge Function receives these events and:
+   - Logs the event in the `email_events` table
+   - Updates the email's status in the `emails` table
+   - Increments the corresponding counter in the campaign's analytics
+
+3. The analytics page (`CampaignAnalytics.tsx`) reads these metrics and displays:
+   - Total emails sent
+   - Open rate (opens/sent)
+   - Click rate (clicks/sent)
+   - Response rate (replies/sent)
+
+### Webhook Handler
+The webhook handler (`supabase/functions/email-webhooks/index.ts`) processes events by:
+1. Verifying the SendGrid signature
+2. Finding the corresponding email record
+3. Logging the event
+4. Updating campaign analytics
+5. Updating email status
+
+This simple, event-driven architecture ensures real-time analytics updates while maintaining data consistency.

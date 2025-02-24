@@ -1126,6 +1126,9 @@ Include the CTA link naturally within the content.`;
                 <option value="converted">Converted</option>
                 <option value="unsubscribed">Unsubscribed</option>
               </select>
+              <Button onClick={() => setShowContactSelection(true)}>
+                Add Contacts
+              </Button>
               {selectedContacts.length > 0 && (
                 <Button onClick={() => setShowListModal(true)}>
                   Add to List ({selectedContacts.length})
